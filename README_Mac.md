@@ -2,6 +2,8 @@
 
 Petit4Sendの主要なファイル転送機能をSwift / SwiftUIで再実装したMacアプリです。Windows版の実行ファイルをラップする方式ではありません。元のファイルは変更していません。
 
+Petit4Sendオリジナル: [Rei HOBARA / REI SOFTWARE](http://rei.to/petit4send.html)。
+
 > [!IMPORTANT]
 > **Xcodeでビルドするときは、ビルド先（Run Destination）を必ず「My Mac」にしてください。**
 >
@@ -74,7 +76,9 @@ swift test
 
 ## 原作者と解析元
 
-原版Petit4Send: Rei HOBARA / REI SOFTWARE。付属 `readme_ja.txt` は改造・リバースエンジニアリング・再配布を許可しています。元プログラムの著作権・表記を保持してください。本移植は原作者の公式版ではありません。
+Petit4Sendオリジナル: [Rei HOBARA / REI SOFTWARE](http://rei.to/petit4send.html)。付属 `readme_ja.txt` は改造・リバースエンジニアリング・再配布を許可しています。元プログラムの著作権・表記を保持してください。本移植は原作者の公式版ではありません。
+
+本Mac版も、改造・リバースエンジニアリング・再配布自由です。
 
 仕様は付属 `P4SEND122.PRG` と `Petit4Send.exe` の.NET ILから確認しました。
 
