@@ -1,0 +1,85 @@
+# Petit4Send for Mac
+
+Petit4Sendの主要なファイル転送機能をSwift / SwiftUIで再実装したMacアプリです。Windows版の実行ファイルをラップする方式ではありません。元のファイルは変更していません。
+
+Petit4Sendオリジナル: [Rei HOBARA / REI SOFTWARE](http://rei.to/petit4send.html)。
+
+> [!IMPORTANT]
+> **Xcodeでビルドするときは、ビルド先（Run Destination）を必ず「My Mac」にしてください。**
+>
+> iPhoneなどを接続していると、ビルド先にそのデバイスが自動で選ばれることがあります。その状態でビルドすると、`Unable to resolve module dependency: 'AppKit'` のエラーになります。AppKitはmacOS専用のため、iOS向けにはビルドできません。
+>
+> ビルド先はXcodeツールバー中央の、スキーム名 `Petit4SendMac` の右側で切り替えられます。エラーが残る場合は Product → Clean Build Folder（⇧⌘K）を実行してからビルドし直してください。コマンドラインの `swift build` や `./build-app.sh` は常にMac向けにビルドされるため、この設定は不要です。
+
+## 起動
+
+`dist/Petit4Send.app` をFinderでダブルクリックしてください。このフォルダでビルドしたアプリはApple Silicon用、macOS 14以降です。署名はローカルのad-hoc署名で、配布用の公証は行っていません。
+
+## Mac → Switch
+
+1. 既存のSwitch側Pro MicroとPC側USB-UARTを接続し、PC側をMacに接続します。
+2. Switchで `P4SEND122.PRG` → `USB RECEIVE` を開き、`WAITING FILE...` の状態にします。
+3. Macアプリの「USB送信」でファイル、種類、Switch側の名前、`/dev/cu.*` ポートを指定します。
+4. 通常は圧縮「自動」、Sync Key「自動 (-1)」を使います。同期が合わない環境では、下記の「Detect Sync Key」で検出して指定できます。
+5. 「Switchへ送信」を押します。Mac側の送信完了後、SwitchのCRC結果を確認し、Aボタンで保存します。MacはArduinoの受信応答を確認できますが、Switchの保存成功は取得できません。
+
+### Sync Keyを検出する
+
+1. Switchで `P4SEND122.PRG` → `DETECT SYNC KEY` を選び、`WAITING SYNC KEY...` にします。
+2. Macの「USB送信」タブでポートを選び、「Detect Sync Key」を押します。ファイル選択は不要です。
+3. 検出信号が約4秒間出力され、自動停止します。「中止」でも停止できます。
+4. Switchに表示された `SYNC KEY: 0〜24` の値を、Mac側の「Sync Key」に設定します。値はMacに自動取得されません。
+5. SwitchでBボタンを押して戻り、`USB RECEIVE` を選んでファイルを送信します。
+
+検出中はファイル送信とポート設定を無効にします。応答がない場合はタイムアウトを表示します。Switchに値が出ない場合は、検出画面・配線を確認して再度実行してください。
+
+### ファイル種別:
+
+- TXT: UTF-8またはBOM付きUTF-16を読み込み、BOMなしUTF-16LEで送信。改行は維持します。
+- DAT: ファイルをバイナリのまま送信。Switch側は4バイト単位の整数配列として保存し、端数をゼロ埋めします。そのため4の倍数でないDATを往復転送すると末尾にゼロが増えます。
+- GRP: PNG/JPEG等を読み込み、左上から行順のBGRA 32bit画素で送信。
+
+名前は半角ASCII 1〜32文字です。空ファイルはSwitch側受信ステートマシンとの互換性上送信しません。入力と展開後サイズの上限は64 MiBです。転送速度は最大約296 bytes/secなので、大きいファイルは長時間かかります。
+
+「中止」は応答待ち中にも使えます。Switch側でもBボタンで受信を終了してください。USBが物理的に切れている場合はキー解放を保証できないので、必要ならSwitch側USBも抜き差ししてください。
+
+## Switch → Mac
+
+1. Switchの `SCREENSHOT SEND` で対象ファイルを選び、表示された全ページをスクリーンショットとして保存します。
+2. Macに画像を取り込み、「画像から復元」→「画像を追加…」で全ページを選択します。ページ順は問いません。
+3. ファイルごとの枚数を確認し、「復元して保存…」で保存先フォルダを選びます。
+
+1280×720の原寸スクリーンショット、または左側720×720を原寸で切り出した画像に対応します。拡大縮小、SNS経由の再圧縮、カメラ撮影された画像には対応しません。PNG/JPEG/BMP/TIFFを読み込めますが、JPEGで失われた情報は修復できません。
+
+ページごとのXORを解除して連結し、LZSSを展開してCRCを照合します。不足ページ、同じページの内容の不一致、CRC不一致は保存しません。完全に同一の重複ページは無視します。複数ファイルもまとめて選択でき、ファイル名・サイズ・CRC等でグループ化します。CRC16には衝突があり、同名・同サイズの別転送を同時に選ぶことは避けてください。
+
+TXTはUTF-8、DATは生バイナリ、GRPはPNGで保存します。既存ファイルは上書きせず連番を付けます。
+
+## ビルドとテスト
+
+XcodeまたはSwift開発環境を用意し、このフォルダで実行します。実行時の外部ライブラリは不要です。
+
+```sh
+swift test
+./build-app.sh
+```
+
+`Package.swift` をXcodeで開いて編集することもできます。
+
+## 実装範囲と検証
+
+- 実装済み: USBファイル送信、LZSS/無圧縮/自動、CRC16、Sync Key検出信号の送信と手動指定、送信中止とタイムアウト、TXT/DAT/GRP、画像の複数ページ結合と復元。
+- 対象外: Windows版のキーボード/マウスの常時エミュレーション、タイピング送信、Arduinoファームウェア書き込み。ユーザーが説明した二方向のファイル転送を移植対象にしています。
+- ソフトウェア検証: CRCベクトル、独立したLZSSビット列、圧縮往復、Switchの受信式を使ったHID復元、独立生成の2ページ画像、欠落・重複・破損検出、テキスト/PNG保存、上書き防止、検出コマンドの順序・待機時間・中止/応答失敗時の停止処理。
+- 確認済: 実際のPro Micro/USB-UART/Switchを使うエンドツーエンド転送、実機のJPEGスクリーンショット。実機互換性は確認済みです。
+
+
+## 原作者と解析元
+
+Petit4Sendオリジナル: [Rei HOBARA / REI SOFTWARE](http://rei.to/petit4send.html)。付属 `readme_ja.txt` は改造・リバースエンジニアリング・再配布を許可しています。元プログラムの著作権・表記を保持してください。本移植は原作者の公式版ではありません。
+
+本Mac版も、改造・リバースエンジニアリング・再配布自由です。
+
+仕様は付属 `P4SEND122.PRG` と `Petit4Send.exe` の.NET ILから確認しました。
+
+解析補助の `Tools/inspect_dotnet.py` はPythonのdnfile/dncilを使いますが、アプリのビルド・実行には不要です。`Tools/make_fixtures.py` はSwift実装とは独立した画像テストデータの生成器です。
