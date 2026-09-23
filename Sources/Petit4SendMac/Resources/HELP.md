@@ -1,6 +1,6 @@
 # Petit4Send for Mac
 
-Petit4Sendの主要なファイル転送機能をSwift / SwiftUIで再実装したMacアプリです。Windows版の実行ファイルをラップする方式ではありません。元のファイルは変更していません。
+Petit4Sendの主要なファイル転送機能をSwift / SwiftUIで再実装したMacアプリです。
 
 ## 起動
 
@@ -46,16 +46,6 @@ Petit4Sendの主要なファイル転送機能をSwift / SwiftUIで再実装し�
 
 TXTはUTF-8、DATは生バイナリ、GRPはPNGで保存します。既存ファイルは上書きせず連番を付けます。
 
-## ビルドとテスト
-
-XcodeまたはSwift開発環境を用意し、このフォルダで実行します。実行時の外部ライブラリは不要です。
-
-```sh
-swift test
-./build-app.sh
-```
-
-`Package.swift` をXcodeで開いて編集することもできます。
 
 ## 実装範囲と検証
 
@@ -64,7 +54,6 @@ swift test
 - ソフトウェア検証: CRCベクトル、独立したLZSSビット列、圧縮往復、Switchの受信式を使ったHID復元、独立生成の2ページ画像、欠落・重複・破損検出、テキスト/PNG保存、上書き防止、検出コマンドの順序・待機時間・中止/応答失敗時の停止処理。
 - 確認済: 実際のPro Micro/USB-UART/Switchを使うエンドツーエンド転送、実機のJPEGスクリーンショット。実機互換性は確認済みです。
 
-付属ファイルにはSwitch側の `Petit4Send.ino.promicro.hex` はありますが、PC側の `USBUART.ino.promicro.hex` はありません。既に動作している転送用ハードウェアを使う前提です。
 
 ## 原作者と解析元
 

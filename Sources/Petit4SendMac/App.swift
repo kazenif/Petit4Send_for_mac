@@ -6,10 +6,25 @@ import Petit4SendCore
 @main
 struct Petit4SendApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
+    @Environment(\.openWindow) private var openWindow
     var body: some Scene {
         WindowGroup("Petit4Send for Mac") { ContentView().frame(minWidth:720,minHeight:540) }
             .windowStyle(.titleBar)
+            .commands {
+                // The app has no help book, so the default item would only open
+                // Help Viewer on an empty result. Show HELP.md instead.
+                CommandGroup(replacing: .help) {
+                    Button("Petit4Send ヘルプ") { openWindow(id: Petit4SendApp.helpWindowID) }
+                        .keyboardShortcut("?", modifiers: .command)
+                }
+            }
+        Window("Petit4Send ヘルプ", id: Petit4SendApp.helpWindowID) {
+            HelpView().frame(minWidth: 520, minHeight: 400)
+        }
+        .defaultSize(width: 760, height: 620)
     }
+
+    static let helpWindowID = "help"
 }
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
