@@ -24,9 +24,14 @@ Omitting the canvas argument keeps the output at the source size. 1024 lands on 
 
 ## Why the icns sits in the target's resources
 
-Xcode builds this package as a bare executable with no `Info.plist`, so `CFBundleIconFile` never applies there and the Dock would show a blank icon. `Package.swift` therefore declares the icns as a resource of `Petit4SendMac` and `AppDelegate.applicationDidFinishLaunching` assigns it to `NSApp.applicationIconImage`, which works with or without a bundle.
+Xcode builds this package as a bare executable with no `Info.plist`, so `CFBundleIconFile` never applies there and the Dock would show a blank icon. `Package.swift` therefore declares the icns as a resource of `Petit4SendMac` and `AppDelegate.applicationDidFinishLaunching` installs it, which works with or without a bundle.
 
-Two consequences:
+Installing it takes two steps, and both matter:
+
+- `NSApp.applicationIconImage` covers the Dock tile only.
+- Naming the image `NSApplicationIcon` covers the About panel, alerts, and Help Viewer. Without a bundle that name is already taken — cached as the enclosing folder's icon — and `setName` is a no-op while a name is in use, so the old image has to release it first. Help Viewer picking this up was a surprise: it is a separate process, yet it reads the icon from the running app rather than from the bundle on disk.
+
+Two consequences of declaring the icns as a resource:
 
 - The icns must be committed even though it is generated. Without it SwiftPM sees a target with no resources, stops synthesising `Bundle.module`, and the build fails with `type 'Bundle' has no member 'module'`.
 - `../build-app.sh` copies `Petit4Send_Petit4SendMac.bundle` into `Contents/Resources`, because `Bundle.module` traps when its resource bundle is missing.
