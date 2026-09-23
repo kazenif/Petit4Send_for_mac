@@ -2,6 +2,13 @@
 
 Petit4Sendの主要なファイル転送機能をSwift / SwiftUIで再実装したMacアプリです。Windows版の実行ファイルをラップする方式ではありません。元のファイルは変更していません。
 
+> [!IMPORTANT]
+> **Xcodeでビルドするときは、ビルド先（Run Destination）を必ず「My Mac」にしてください。**
+>
+> iPhoneなどを接続していると、ビルド先にそのデバイスが自動で選ばれることがあります。その状態でビルドすると、`Unable to resolve module dependency: 'AppKit'` のエラーになります。AppKitはmacOS専用のため、iOS向けにはビルドできません。
+>
+> ビルド先はXcodeツールバー中央の、スキーム名 `Petit4SendMac` の右側で切り替えられます。エラーが残る場合は Product → Clean Build Folder（⇧⌘K）を実行してからビルドし直してください。コマンドラインの `swift build` や `./build-app.sh` は常にMac向けにビルドされるため、この設定は不要です。
+
 ## 起動
 
 `dist/Petit4Send.app` をFinderでダブルクリックしてください。このフォルダでビルドしたアプリはApple Silicon用、macOS 14以降です。署名はローカルのad-hoc署名で、配布用の公証は行っていません。

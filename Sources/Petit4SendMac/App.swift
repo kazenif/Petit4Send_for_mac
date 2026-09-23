@@ -116,7 +116,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     let stream = try USBProtocol.stream(bytes:bytes,name:name,kind:kind,compression:mode,width:width,height:height)
                     let reports = try HIDReports(stream,syncKey:sync)
                     let originalCount = bytes.count
-                    await MainActor.run { self.status = "送信中: \(originalCount) バイト → \(stream.count) バイト（約\(Int(Double(stream.count)/296))秒）" }
+                    // Switch shows the payload length field at stream offset 112, not the full stream length.
+                    let payloadCount = Codec.integer(stream, 112, 4)
+                    await MainActor.run { self.status = "送信中: \(originalCount) バイト → 本体 \(payloadCount) バイト（ヘッダー込み \(stream.count) バイト、約\(Int(Double(stream.count)/296))秒）" }
                     try SerialPort.send(path:path,reports:reports,cancellation:token) { value in
                         Task { @MainActor in self.progress = value }
                     }
