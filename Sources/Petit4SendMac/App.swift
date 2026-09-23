@@ -20,6 +20,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // beyond matching what the bundle already declares.
         if let url = Bundle.module.url(forResource: "Petit4SendMac", withExtension: "icns"),
            let icon = NSImage(contentsOf: url) {
+            // applicationIconImage only covers the Dock tile. The About panel and
+            // alerts resolve the icon by name instead, and without a bundle that
+            // name is already cached as the enclosing folder's icon. setName is
+            // ignored while the name is taken, so release it from the old image
+            // first.
+            NSImage(named: NSImage.applicationIconName)?.setName(nil)
+            icon.setName(NSImage.applicationIconName)
             NSApp.applicationIconImage = icon
         }
     }
