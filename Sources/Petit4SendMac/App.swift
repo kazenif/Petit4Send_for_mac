@@ -14,6 +14,14 @@ struct Petit4SendApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular); NSApp.activate(ignoringOtherApps:true)
+        // Xcode builds this package as a bare executable with no Info.plist, so
+        // CFBundleIconFile never applies and the Dock shows a blank icon. Set it
+        // from the bundled icns instead; in dist/Petit4Send.app this is a no-op
+        // beyond matching what the bundle already declares.
+        if let url = Bundle.module.url(forResource: "Petit4SendMac", withExtension: "icns"),
+           let icon = NSImage(contentsOf: url) {
+            NSApp.applicationIconImage = icon
+        }
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 }

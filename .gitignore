@@ -1,0 +1,8 @@
+.build/
+.swiftpm/
+.tools-venv/
+.DS_Store
+dist/
+Assets/Petit4SendMac.iconset/
+# Sources/Petit4SendMac/Resources/Petit4SendMac.icns is generated too, but
+# Package.swift declares it as a resource, so it has to be committed.
