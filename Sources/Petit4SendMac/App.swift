@@ -307,7 +307,7 @@ struct ContentView: View {
                         }
                         GridRow {
                             Color.clear.frame(width:0,height:0)
-                            Text("検出時はSwitchで DETECT SYNC KEY を選んでから、Detect Sync Keyを押してください（約4秒）").font(.system(size: 14)).foregroundStyle(.secondary)
+                            Text("検出時はSwitchで DETECT SYNC KEY を選んでから、Detect Sync Keyを押してください").font(.system(size: 14)).foregroundStyle(.secondary)
                         }
                     }
                     Grid(alignment:.leading,horizontalSpacing:16,verticalSpacing:12) {
