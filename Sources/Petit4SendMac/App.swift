@@ -15,8 +15,10 @@ struct Petit4SendApp: App {
                 // その直下の行に、P4SEND との対応を出す。数字だけの版数だと「Version」が付くので、文言そのものを渡す。
                 CommandGroup(replacing: .appInfo) {
                     Button("About \(ProcessInfo.processInfo.processName)") {
+                        // version を空にすると、CFBundleVersion の (9) のようなビルド番号を出さない。
                         NSApp.orderFrontStandardAboutPanel(options: [
-                            .applicationVersion: "1.2.2 互換"
+                            .applicationVersion: "1.2.2 互換",
+                            .version: ""
                         ])
                     }
                 }
@@ -35,7 +37,45 @@ struct Petit4SendApp: App {
 
     static let helpWindowID = "help"
 }
+/// 送信と検出のあいだ、終了をキー解放または停止パケットのあとまで遅らせる。
+final class TransferGate: @unchecked Sendable {
+    static let shared = TransferGate()
+    private let lock = NSLock()
+    private var token: Cancellation?
+    private var quitAfterCleanup = false
+    private var onQuit: (() -> Void)?
+    func begin(_ token: Cancellation, onQuit: @escaping () -> Void) {
+        lock.lock()
+        self.token = token
+        self.onQuit = onQuit
+        quitAfterCleanup = false
+        lock.unlock()
+    }
+    /// 作業中なら中止を依頼して true。止まっていれば false（すぐ終了してよい）。
+    func requestStop() -> Bool {
+        lock.lock()
+        let current = token
+        let notify = onQuit
+        if current != nil { quitAfterCleanup = true }
+        lock.unlock()
+        current?.cancel()
+        if current != nil { notify?() }
+        return current != nil
+    }
+    func end() -> Bool {
+        lock.lock()
+        token = nil
+        onQuit = nil
+        let quit = quitAfterCleanup
+        quitAfterCleanup = false
+        lock.unlock()
+        return quit
+    }
+}
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        TransferGate.shared.requestStop() ? .terminateCancel : .terminateNow
+    }
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular); NSApp.activate(ignoringOtherApps:true)
         // Xcode はこのパッケージを Info.plist の無い単体実行ファイルとしてビルドする。
@@ -51,7 +91,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSApp.applicationIconImage = icon
         }
     }
-    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        !TransferGate.shared.requestStop()
+    }
 }
 /// 送信タブと画像復元タブの状態。画面の更新はメインアクターに限定する。
 @MainActor final class Model: ObservableObject {
@@ -71,12 +113,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @Published var imageStatus = "SwitchのSCREENSHOT SENDで保存した画像を追加してください"
     @Published var imageBusy = false
     private var cancellation: Cancellation?
-    /// ポート一覧を読み直す。今の選択が消えていれば先頭を選ぶ。
-    func refresh() { ports = SerialPort.available(); if !ports.contains(port) { port = ports.first ?? "" } }
+    private var portWatcher: SerialPort.Watcher?
+    /// `/dev` の変化で一覧を読み直す。送信中でも選択規則だけは同じ。
+    func watchPorts() {
+        guard portWatcher == nil else { return }
+        portWatcher = SerialPort.Watcher { [weak self] in
+            Task { @MainActor in self?.refresh() }
+        }
+    }
+    /// ポート一覧を読み直す。未選択で増分が 1 つならそれを選び、消えた選択は未選択に戻す。
+    func refresh() {
+        let current = SerialPort.available()
+        port = SerialPort.choose(previous: ports, current: current, selected: port)
+        ports = current
+    }
     /// 送信ファイルを選ぶ。Switch 側の名前の初期値は、拡張子込みで大文字化した 32 文字。
     func chooseFile() {
         let panel = NSOpenPanel(); panel.canChooseDirectories = false
-        if panel.runModal() == .OK, let url = panel.url { file = url; filename = String(url.lastPathComponent.uppercased().prefix(32)) }
+        if panel.runModal() == .OK, let url = panel.url { file = url; filename = String(USBProtocol.asciiUppercased(url.lastPathComponent).prefix(32)) }
     }
     /// 進行中の送受信へ中止を知らせる。実際に止まるのはシリアル側の次の区切り。
     func stop() { cancellation?.cancel(); status = "中止処理中…" }
@@ -84,9 +138,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func detectSyncKey() {
         guard !busy, !port.isEmpty else { return }
         let path = port, token = Cancellation()
-        cancellation = token; busy = true; progress = 0; remainingSeconds = nil
+        cancellation = token
+        TransferGate.shared.begin(token) { [weak self] in
+            Task { @MainActor in self?.status = "終了処理中…"; self?.remainingSeconds = nil }
+        }
+        busy = true; progress = 0; remainingSeconds = nil
         status = "Sync Key検出中… SwitchのDETECT SYNC KEY画面を確認してください"
         Task {
+            defer { self.finishTransfer() }
             do {
                 try await Task.detached {
                     try SerialPort.detectSyncKey(path: path, cancellation: token) { value in
@@ -99,7 +158,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     ? "検出を中止しました。Switch側はBボタンで戻れます。停止信号が届かず検出が続く場合はUSBを接続し直してください。"
                     : error.localizedDescription
             }
-            busy = false; cancellation = nil
         }
     }
     /// ファイルを種別に合わせてバイト列にし、HID レポートとして送る。
@@ -108,8 +166,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func send() {
         guard let file else { return }
         let kind = kind, mode = compression, name = filename, path = port, sync = syncKey
-        let token = Cancellation(); cancellation = token; busy = true; progress = 0; remainingSeconds = nil; status = "送信データを準備しています…"
+        let token = Cancellation(); cancellation = token
+        TransferGate.shared.begin(token) { [weak self] in
+            Task { @MainActor in self?.status = "終了処理中…"; self?.remainingSeconds = nil }
+        }
+        busy = true; progress = 0; remainingSeconds = nil; status = "送信データを準備しています…"
         Task {
+            defer { self.finishTransfer() }
             do {
                 try await Task.detached {
                     let attributes = try FileManager.default.attributesOfItem(atPath:file.path)
@@ -129,7 +192,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     }
                     try token.checkForUI()
                     guard !bytes.isEmpty else { throw TransferError("空ファイルはSwitch側の受信処理に対応していません。") }
-                    let stream = try USBProtocol.stream(bytes:bytes,name:name,kind:kind,compression:mode,width:width,height:height)
+                    let stream = try USBProtocol.stream(bytes:bytes,name:name,kind:kind,compression:mode,width:width,height:height) { token.isCancelled }
                     let reports = try HIDReports(stream,syncKey:sync)
                     let originalCount = bytes.count
                     // Switch が表示するのはストリーム全長ではなく、オフセット 112 のペイロード長。
@@ -150,8 +213,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }.value
                 status = "送信終了。Switch側でCRC結果を確認し、Aボタンで保存してください"
             } catch { status = error.localizedDescription }
-            busy = false; remainingSeconds = nil; cancellation = nil
         }
+    }
+    /// 送信か検出が終わったあと、終了が予約されていればここでアプリを閉じる。
+    private func finishTransfer() {
+        busy = false
+        remainingSeconds = nil
+        cancellation = nil
+        if TransferGate.shared.end() { NSApp.terminate(nil) }
     }
     /// スクリーンショットを順不同で追加する。ページ番号は画像内のヘッダーから取る。
     func addImages() {
@@ -218,7 +287,7 @@ struct ContentView: View {
                         }
                         GridRow {
                             Color.clear.frame(width:0,height:0)
-                            Text("Petit4Send i/Fケーブルを接続した際に、新たに現れるポートを設定して下さい").font(.system(size: 14)).foregroundStyle(.secondary)
+                            Text("未選択のときにケーブルを接続すると、増えたポートを選びます。選択中に抜くと未選択に戻ります").font(.system(size: 14)).foregroundStyle(.secondary)
                         }
                     }
                     Grid(alignment:.leading,horizontalSpacing:16,verticalSpacing:8) {
@@ -228,7 +297,7 @@ struct ContentView: View {
                                 TextField("−1", value: $model.syncKey, format: .number.grouping(.never))
                                     .focused($syncKeyFocused)
                                     .frame(width: 44)
-                                    .onChange(of: syncKeyFocused) { focused in
+                                    .onChange(of: syncKeyFocused) { _, focused in
                                         if !focused { model.syncKey = min(24, max(-1, model.syncKey)) }
                                     }
                                 Stepper("Sync Key", value: $model.syncKey, in: -1...24).labelsHidden()
@@ -262,7 +331,7 @@ struct ContentView: View {
                                 Text("残り ")
                                 Text("\(seconds)").font(.system(size: 14, design: .monospaced))
                                 Text(" 秒")
-                            }.font(.system(size: 14)).foregroundStyle(Color(red: 0, green: 0, blue: 0))
+                            }.font(.system(size: 14))
                         }
                     }
                     Text("Switchで USB RECEIVE を開き、WAITING FILE… の状態にしてください").font(.system(size: 14))
@@ -292,6 +361,6 @@ struct ContentView: View {
         .font(.system(size: 16))
         .controlSize(.large)
         .padding(20)
-        .onAppear { model.refresh() }
+        .onAppear { model.watchPorts(); model.refresh() }
     }
 }

@@ -1,5 +1,5 @@
 import Foundation
-import AppKit
+import CoreGraphics
 import ImageIO
 import UniformTypeIdentifiers
 
@@ -119,27 +119,105 @@ public struct ScreenshotPage {
 }
 
 /// 直線（プリマルチプライされていない）RGBA。
-/// GRP のアルファを落とさないため、`CGImage` の乗算済みバッファではなく色成分を直接読む。
+/// GRP のアルファを落とさないため、色管理を通さず 8bit の成分をそのまま読む。
 public struct Raster {
     public let width: Int
     public let height: Int
     public var rgba: [UInt8]
     public static func load(_ url: URL) throws -> Raster {
-        guard let source = CGImageSourceCreateWithURL(url as CFURL,nil), let image = CGImageSourceCreateImageAtIndex(source,0,nil), image.width > 0, image.height > 0, image.width*image.height <= Codec.maximumSize/4 else { throw TransferError("画像を読み込めません（最大16Mピクセル）。") }
-        // NSBitmapImageRep は乗算前の成分を返すので、GRP のアルファを保てる。
-        let rep = NSBitmapImageRep(cgImage: image)
-        var pixels = [UInt8](repeating:0,count:image.width*image.height*4)
-        for y in 0..<image.height {
-            for x in 0..<image.width {
-                guard let original = rep.colorAt(x:x,y:y), let c = original.colorSpace.colorSpaceModel == .rgb ? original : original.usingColorSpace(.sRGB) else { throw TransferError("画像の色空間を変換できません。") }
-                let p = (y*image.width+x)*4
-                pixels[p] = UInt8(clamping: Int((c.redComponent*255).rounded()))
-                pixels[p+1] = UInt8(clamping: Int((c.greenComponent*255).rounded()))
-                pixels[p+2] = UInt8(clamping: Int((c.blueComponent*255).rounded()))
-                pixels[p+3] = UInt8(clamping: Int((c.alphaComponent*255).rounded()))
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { throw TransferError("画像を読み込めません（最大16Mピクセル）。") }
+        let options = [kCGImageSourceShouldCacheImmediately: true] as CFDictionary
+        guard let image = CGImageSourceCreateImageAtIndex(source, 0, options) else { throw TransferError("画像を読み込めません（最大16Mピクセル）。") }
+        let width = image.width, height = image.height
+        guard width > 0, height > 0, width <= Codec.maximumSize / 4, height <= (Codec.maximumSize / 4) / width else { throw TransferError("画像を読み込めません（最大16Mピクセル）。") }
+        let pixels = try straightRGBA(image)
+        guard pixels.count == width * height * 4 else { throw TransferError("画像を読み込めません（最大16Mピクセル）。") }
+        return Raster(width: width, height: height, rgba: pixels)
+    }
+    /// 8bit の RGB(A) ならデータプロバイダのバイト列を RGBA に並べる。それ以外は同じ色空間へ描く。
+    private static func straightRGBA(_ image: CGImage) throws -> [UInt8] {
+        if let copied = copyStraightPixels(image) { return copied }
+        return try drawStraightPixels(image)
+    }
+    private static func copyStraightPixels(_ image: CGImage) -> [UInt8]? {
+        guard image.bitsPerComponent == 8, image.bitsPerPixel == 24 || image.bitsPerPixel == 32,
+              let provider = image.dataProvider, let data = provider.data as Data? else { return nil }
+        let order = image.bitmapInfo.intersection(.byteOrderMask)
+        if order == .byteOrder16Little || order == .byteOrder16Big { return nil }
+        let alpha = CGImageAlphaInfo(rawValue: image.bitmapInfo.rawValue & CGBitmapInfo.alphaInfoMask.rawValue) ?? .none
+        if alpha == .alphaOnly { return nil }
+        let width = image.width, height = image.height, bytesPerPixel = image.bitsPerPixel / 8
+        let rowBytes = image.bytesPerRow == 0 ? width * bytesPerPixel : image.bytesPerRow
+        guard data.count >= rowBytes * (height - 1) + width * bytesPerPixel else { return nil }
+        let little = order == .byteOrder32Little
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        data.withUnsafeBytes { raw in
+            guard let base = raw.baseAddress?.assumingMemoryBound(to: UInt8.self) else { return }
+            for y in 0..<height {
+                for x in 0..<width {
+                    let sample = base.advanced(by: y * rowBytes + x * bytesPerPixel)
+                    let (r, g, b, a) = components(sample, bytesPerPixel: bytesPerPixel, alpha: alpha, little: little)
+                    let destination = (y * width + x) * 4
+                    if a == 0 || a == 255 || !isPremultiplied(alpha) {
+                        pixels[destination] = a == 0 ? 0 : r
+                        pixels[destination + 1] = a == 0 ? 0 : g
+                        pixels[destination + 2] = a == 0 ? 0 : b
+                    } else {
+                        pixels[destination] = UInt8(min(255, Int(r) * 255 / Int(a)))
+                        pixels[destination + 1] = UInt8(min(255, Int(g) * 255 / Int(a)))
+                        pixels[destination + 2] = UInt8(min(255, Int(b) * 255 / Int(a)))
+                    }
+                    pixels[destination + 3] = a
+                }
             }
         }
-        return Raster(width:image.width,height:image.height,rgba:pixels)
+        return pixels
+    }
+    private static func components(_ sample: UnsafePointer<UInt8>, bytesPerPixel: Int, alpha: CGImageAlphaInfo, little: Bool) -> (UInt8, UInt8, UInt8, UInt8) {
+        if bytesPerPixel == 3 { return (sample[0], sample[1], sample[2], 255) }
+        let red, green, blue, alphaIndex: Int
+        switch alpha {
+        case .premultipliedFirst, .first, .noneSkipFirst:
+            (red, green, blue, alphaIndex) = (1, 2, 3, 0)
+        default:
+            (red, green, blue, alphaIndex) = (0, 1, 2, 3)
+        }
+        func at(_ index: Int) -> UInt8 { sample[little ? 3 - index : index] }
+        let alphaByte: UInt8
+        switch alpha {
+        case .none, .noneSkipFirst, .noneSkipLast: alphaByte = 255
+        default: alphaByte = at(alphaIndex)
+        }
+        return (at(red), at(green), at(blue), alphaByte)
+    }
+    private static func isPremultiplied(_ alpha: CGImageAlphaInfo) -> Bool {
+        alpha == .premultipliedFirst || alpha == .premultipliedLast
+    }
+    /// 画像自身の色空間へ 8bit RGBA で描く。失敗したときだけ sRGB へ落とす。
+    private static func drawStraightPixels(_ image: CGImage) throws -> [UInt8] {
+        let width = image.width, height = image.height
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        let spaces = [image.colorSpace, CGColorSpace(name: CGColorSpace.sRGB)].compactMap { $0 }
+        let drew = pixels.withUnsafeMutableBytes { raw -> Bool in
+            for space in spaces {
+                guard let context = CGContext(data: raw.baseAddress, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4, space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { continue }
+                context.interpolationQuality = .none
+                context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+                return true
+            }
+            return false
+        }
+        guard drew else { throw TransferError("画像を読み込めません（最大16Mピクセル）。") }
+        for offset in stride(from: 0, to: pixels.count, by: 4) {
+            let alpha = Int(pixels[offset + 3])
+            if alpha == 0 { pixels[offset] = 0; pixels[offset + 1] = 0; pixels[offset + 2] = 0 }
+            else if alpha < 255 {
+                pixels[offset] = UInt8(min(255, Int(pixels[offset]) * 255 / alpha))
+                pixels[offset + 1] = UInt8(min(255, Int(pixels[offset + 1]) * 255 / alpha))
+                pixels[offset + 2] = UInt8(min(255, Int(pixels[offset + 2]) * 255 / alpha))
+            }
+        }
+        return pixels
     }
     /// sRGB・非プリマルチプライの RGBA を PNG にする。補間はしない。
     public func png() throws -> Data {

@@ -13,7 +13,7 @@ Petit4Sendオリジナル: [Rei HOBARA / REI SOFTWARE](http://rei.to/petit4send.
 
 ## 起動
 
-`dist/Petit4Send.app` をFinderでダブルクリックしてください。このフォルダでビルドしたアプリはApple Silicon用、macOS 14以降です。署名はローカルのad-hoc署名で、配布用の公証は行っていません。
+`dist/Petit4Send.app` をFinderでダブルクリックしてください。このフォルダでビルドしたアプリはApple Silicon用、macOS 14以降です。`./build-app.sh` の署名はローカルの ad-hoc 署名です。頒布用の Developer ID 署名と公証は `./build-app-sign.sh` が行い、配るのはその .app です。
 
 ## Mac → Switch
 
@@ -22,6 +22,8 @@ Petit4Sendオリジナル: [Rei HOBARA / REI SOFTWARE](http://rei.to/petit4send.
 3. Macアプリの「USB送信」でファイル、種類、Switch側の名前、`/dev/cu.*` ポートを指定します。
 4. 通常は圧縮「自動」、Sync Key「自動 (-1)」を使います。同期が合わない環境では、下記の「Detect Sync Key」で検出して指定できます。
 5. 「Switchへ送信」を押します。Mac側の送信完了後、SwitchのCRC結果を確認し、Aボタンで保存します。MacはArduinoの受信応答を確認できますが、Switchの保存成功は取得できません。
+
+ポート一覧は、ケーブルの抜き差しに合わせて更新されます。「更新」ボタンも同じ規則です。何も選んでいないときに `/dev/cu.*` が1つ増えると、そのポートを選びます。すでに選んでいるときは一覧だけを更新し、選択は変えません。選択中のポートが抜かれると未選択に戻り、残っている別のポートには切り替えません。未選択のまま複数のポートが同時に増えたときは、自動では選びません。
 
 ### Sync Keyを検出する
 

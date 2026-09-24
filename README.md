@@ -13,7 +13,7 @@ Petit4Sendオリジナル: [Rei HOBARA / REI SOFTWARE](http://rei.to/petit4send.
 
 ## 起動
 
-`dist/Petit4Send.app` をFinderでダブルクリックしてください。このフォルダでビルドしたアプリはApple Silicon用、macOS 14以降です。署名はローカルのad-hoc署名で、配布用の公証は行っていません。
+`dist/Petit4Send.app` をFinderでダブルクリックしてください。このフォルダでビルドしたアプリはApple Silicon用、macOS 14以降です。`./build-app.sh` の署名はローカルの ad-hoc 署名です。頒布用の Developer ID 署名と公証は `./build-app-sign.sh` が行い、配るのはその .app です。
 
 ## Mac → Switch
 
@@ -62,6 +62,14 @@ XcodeまたはSwift開発環境を用意し、このフォルダで実行しま�
 ```sh
 swift test
 ./build-app.sh
+```
+
+`./build-app-sign.sh` の公証は、キーチェーンのプロファイル `petit4send-notary` を使います。初回だけ、App Store Connect のアプリ用パスワードで登録します。
+
+```sh
+xcrun notarytool store-credentials "petit4send-notary" \
+  --apple-id "あなたのApple ID" \
+  --team-id "4Z3676RC5X"
 ```
 
 `Package.swift` をXcodeで開いて編集することもできます。

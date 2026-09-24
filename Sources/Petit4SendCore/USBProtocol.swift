@@ -18,11 +18,12 @@ public enum USBProtocol {
     ///
     /// TXT は BOM なし UTF-16LE、DAT は生バイト、GRP は寸法を本体に含まない行優先 BGRA。
     /// 名前は `:` `/` `\` を含まない半角 ASCII で 1...32 文字。
-    public static func stream(bytes: [UInt8], name: String, kind: FileKind, compression: Compression, width: Int = 0, height: Int = 0) throws -> [UInt8] {
+    /// `shouldCancel` は LZSS の途中で見る。準備中の中止であり、まだ Switch へは送っていない。
+    public static func stream(bytes: [UInt8], name: String, kind: FileKind, compression: Compression, width: Int = 0, height: Int = 0, shouldCancel: () -> Bool = { false }) throws -> [UInt8] {
         guard bytes.count <= Codec.maximumSize else { throw TransferError("上限64 MiBを超えています。") }
-        let nameBytes = Array(name.uppercased().utf8)
+        let nameBytes = Array(asciiUppercased(name).utf8)
         guard !nameBytes.isEmpty, nameBytes.count <= 32, nameBytes.allSatisfy({ $0 >= 32 && $0 < 127 && $0 != 58 && $0 != 47 && $0 != 92 }) else { throw TransferError("送信先名は半角ASCII 1〜32文字で指定してください（: / \\ は不可）。") }
-        let zipped = compression == .none ? [] : Codec.compress(bytes)
+        let zipped = compression == .none ? [] : try Codec.compress(bytes, shouldCancel: shouldCancel)
         let useZip = compression == .lzss || (compression == .auto && zipped.count < bytes.count)
         let body = useZip ? zipped : bytes
         var out = [UInt8](repeating: 0, count: 16) + [UInt8](repeating: 1, count: 50) + [0]
@@ -37,6 +38,16 @@ public enum USBProtocol {
     static func choose(_ n: Int, _ k: Int) -> UInt64 {
         if n < k { return 0 }; if k == 0 { return 1 }
         return (1...k).reduce(UInt64(1)) { $0 * UInt64(n-$1+1) / UInt64($1) }
+    }
+    /// `a`...`z` だけを大文字にする。`String.uppercased()` はロケールによって `i` や `ß` を ASCII の外へ出す。
+    public static func asciiUppercased(_ name: String) -> String {
+        var scalars = String.UnicodeScalarView()
+        for scalar in name.unicodeScalars {
+            let value = scalar.value
+            if (97...122).contains(value), let upper = UnicodeScalar(value - 32) { scalars.append(upper) }
+            else { scalars.append(scalar) }
+        }
+        return String(scalars)
     }
     /// テスト用に全レポートを配列へ展開する。本番の送信は `HIDReports` を直接走査する。
     public static func reports(_ stream: [UInt8], syncKey: Int = -1) throws -> [[UInt8]] {

@@ -28,6 +28,30 @@ public enum SerialPort {
     public static func available() -> [String] {
         ((try? FileManager.default.contentsOfDirectory(atPath:"/dev")) ?? []).filter { $0.hasPrefix("cu.") }.sorted().map { "/dev/"+$0 }
     }
+    /// 抜き差しのあと、どのポートを選ぶか。
+    ///
+    /// 未選択で増えたポートが 1 つならそれを選ぶ。選択中のポートが残っていれば維持する。
+    /// 選択中のポートが消えていたら未選択に戻し、残った別のポートには切り替えない。
+    /// 未選択のまま複数同時に増えたときは、どれかを決めない。
+    public static func choose(previous: [String], current: [String], selected: String) -> String {
+        if !selected.isEmpty { return current.contains(selected) ? selected : "" }
+        let added = current.filter { !previous.contains($0) }
+        return added.count == 1 ? added[0] : ""
+    }
+    /// `/dev` の変化で `onChange` を呼ぶ。`cu.*` の出現と消滅はここから一覧を読み直して知る。
+    public final class Watcher: @unchecked Sendable {
+        private var source: DispatchSourceFileSystemObject?
+        public init?(onChange: @escaping @Sendable () -> Void) {
+            let fd = open("/dev", O_EVTONLY)
+            guard fd >= 0 else { return nil }
+            let source = DispatchSource.makeFileSystemObjectSource(fileDescriptor: fd, eventMask: .write, queue: .main)
+            source.setEventHandler(handler: onChange)
+            source.setCancelHandler { close(fd) }
+            source.resume()
+            self.source = source
+        }
+        deinit { source?.cancel() }
+    }
     /// `reports` を送り切る。終了時（中止や失敗を含む）にキー解放レポートを出す。
     public static func send(path: String, reports: HIDReports, cancellation: Cancellation, progress: @escaping (Double) -> Void) throws {
         try run(path: path, reports: reports, cancellation: cancellation, progress: progress)

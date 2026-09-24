@@ -28,12 +28,14 @@ public enum Codec {
     /// フラグ 0 のあとにリテラル 8 ビット、フラグ 1 のあとに「距離−1」10 ビットと「長さ−1」5 ビット。
     /// 履歴は 0 で初期化した 1024 バイトのリングで、参照は自身と重なってよい。
     /// 3 バイトのハッシュ鎖で候補を探す。Switch の UNLZ が 32 ビット語で読むため、出力は 4 バイト境界まで 0 で埋める。
-    public static func compress(_ input: [UInt8]) -> [UInt8] {
+    public static func compress(_ input: [UInt8], shouldCancel: () -> Bool = { false }) throws -> [UInt8] {
+        if shouldCancel() { throw TransferError("中止しました。") }
         var bits = BitWriter(), pos = 0
         var heads: [Int: Int] = [:]
         var previous = [Int](repeating: -1, count: 1024)
         func hash(_ p: Int) -> Int { Int(input[p]) << 16 | Int(input[p+1]) << 8 | Int(input[p+2]) }
         while pos < input.count {
+            if pos.isMultiple(of: 16384) && shouldCancel() { throw TransferError("中止しました。") }
             var length = 0, distance = 0
             if pos + 2 < input.count {
                 let key = hash(pos)

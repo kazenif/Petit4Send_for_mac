@@ -21,7 +21,7 @@ final class ProtocolTests: XCTestCase {
         let noise: [UInt8] = (0..<5000).map { _ in random = random &* 1664525 &+ 1013904223; return UInt8(truncatingIfNeeded:random >> 16) }
         let cases = [[], [0], [255], Array("日本語\nPRINT 123\r\n".utf8), [UInt8](repeating:42,count:5000), noise, noise+noise]
         for bytes in cases {
-            let compressed = Codec.compress(bytes)
+            let compressed = try Codec.compress(bytes)
             XCTAssertEqual(compressed.count%4,0)
             XCTAssertEqual(try Codec.decompress(compressed,size:bytes.count),bytes)
         }
@@ -31,6 +31,7 @@ final class ProtocolTests: XCTestCase {
         XCTAssertThrowsError(try Codec.decompress([],size:1))
         XCTAssertThrowsError(try Codec.decompress([1],size:1))
         XCTAssertThrowsError(try Codec.decompress([],size:Codec.maximumSize+1))
+        XCTAssertThrowsError(try Codec.compress([1,2,3,4], shouldCancel: { true }))
     }
     /// 無圧縮 TXT のヘッダー位置。名前に非 ASCII は使えない。
     func testUSBHeader() throws {
@@ -46,6 +47,9 @@ final class ProtocolTests: XCTestCase {
         XCTAssertEqual(Array(stream[116..<120]),bytes)
         XCTAssertEqual(Codec.integer(stream,120,2),Int(Codec.crc(bytes)))
         XCTAssertThrowsError(try USBProtocol.stream(bytes:bytes,name:"日本語",kind:.text,compression:.none))
+        let lower = try USBProtocol.stream(bytes:bytes,name:"i",kind:.text,compression:.none)
+        XCTAssertEqual(String(bytes:lower[67..<72],encoding:.ascii),"TXT:I")
+        XCTAssertThrowsError(try USBProtocol.stream(bytes:bytes,name:"ß",kind:.text,compression:.none))
     }
     /// P4SEND122.PRG の `@RECEIVE` と同じ組み合わせ和でビット列を戻す。
     /// Sync Key 12 のコマンドは `2 + 4 * 12 = 50`。範囲外の Sync Key は拒否する。

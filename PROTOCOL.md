@@ -67,4 +67,4 @@ BASIC's raw fallback writes only complete 32-bit words. A raw screenshot of a fi
 
 ## Validation limits
 
-The 15 XCTest cases include a two-page, 181384-byte fixture generated independently by Python, including the 181380-byte page boundary, bit packing, mask removal, reverse ordering, and CRC. They do not replace USB hardware testing or validation against an actual Switch-produced JPEG. No hardware was flashed or serial transfer started during implementation.
+The XCTest suite includes a two-page, 181384-byte fixture generated independently by Python, including the 181380-byte page boundary, bit packing, mask removal, reverse ordering, and CRC. Those cases do not replace USB hardware testing. End-to-end transfer with a Pro Micro, USB-UART, and Switch, and decoding of real Switch JPEG screenshots, has been confirmed.
