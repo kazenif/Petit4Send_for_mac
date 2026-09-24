@@ -1,16 +1,13 @@
-// Removes lossy-compression noise from the icon artwork.
+// アイコン原画から、非可逆圧縮のノイズを除く。
 //
-// icon-candidate.png is a ~198px rendering of flat-colour pixel art that went
-// through lossy compression: it carries 6859 distinct colours, ringing along
-// every edge, and isolated dark flecks in the white surround. This restores the
-// small intended palette and drops the surround to transparent so the artwork
-// works as a macOS icon.
+// icon-candidate.png は平坦な色のドット絵を約 198px に描いたもので、非可逆圧縮を
+// 通っている。色は 6859 種に割れ、縁にはリンギングがあり、白い余白に暗い点がある。
+// 意図した少ないパレットへ戻し、余白を透明にして macOS のアイコンとして使えるようにする。
 //
-// Given a canvas size it also enlarges the result: the artwork is replicated at
-// an integer factor so the dots stay square-edged, while the silhouette's alpha
-// is evaluated at the output resolution so the outer edge stays smooth.
+// キャンバスサイズを渡すと拡大もする。絵は整数倍で複製してドットの縁を直角に保ち、
+// 外形のアルファだけ出力解像度で評価して、外縁は滑らかにする。
 //
-// Usage: swift Tools/clean-icon.swift <input.png> <output.png> [canvas]
+// 使い方: swift Tools/clean-icon.swift <input.png> <output.png> [canvas]
 
 import Foundation
 import CoreGraphics
@@ -64,8 +61,8 @@ func at(_ buf: [Color], _ x: Int, _ y: Int) -> Color {
     buf[min(max(y, 0), h - 1) * w + min(max(x, 0), w - 1)]
 }
 
-// Step 1: a 3x3 per-channel median removes compression ringing while leaving
-// flat regions and straight edges in place.
+// 手順 1: チャンネルごとの 3×3 中央値で、圧縮のリンギングを落とす。
+// 平坦な領域と直線の縁はそのまま残る。
 var smoothed = pixels
 for y in 0..<h {
     for x in 0..<w {
@@ -81,9 +78,9 @@ for y in 0..<h {
     }
 }
 
-// Step 2: recover the intended palette with k-means, seeded from the most
-// common coarsely quantised colours so the clusters start well separated.
-// 20 clusters keep the toolbox's dark shading distinct from the olive handle.
+// 手順 2: k-means で意図したパレットを取り戻す。種は粗く量子化した色の出現順で、
+// クラスタが最初から離れるようにする。20 個にすると、工具箱の暗い陰影と
+// オリーブ色の持ち手が別色のまま残る。
 let k = 20
 var seedCounts: [Int: Int] = [:]
 for c in smoothed {
@@ -116,8 +113,8 @@ for _ in 0..<30 {
 var quantised = [Color](repeating: Color(r: 0, g: 0, b: 0), count: w * h)
 for i in 0..<(w * h) { quantised[i] = centroids[assignment[i]] }
 
-// Step 3: drop speckles. A palette index that barely appears in its own
-// neighbourhood is compression debris, not intended detail.
+// 手順 3: まだらを落とす。近傍にほとんど出てこないパレット番号は、
+// 意図したディテールではなく圧縮の屑なので、周囲の最頻値に置き換える。
 var indices = assignment
 for _ in 0..<2 {
     var next = indices
@@ -140,8 +137,8 @@ for _ in 0..<2 {
 }
 for i in 0..<(w * h) { quantised[i] = centroids[indices[i]] }
 
-// Step 4: the white surround is one connected region reaching every edge, so a
-// flood fill from the border finds it without touching the cyan tile.
+// 手順 4: 白い余白は四辺に達する 1 つの連結領域なので、縁からの塗りつぶしで
+// シアンのタイルに触れずに特定できる。
 let whiteThreshold = 232.0
 var isSurround = [Bool](repeating: false, count: w * h)
 var stack: [Int] = []
@@ -163,15 +160,13 @@ while let i = stack.popLast() {
     if y < h - 1 { seed(x, y + 1) }
 }
 
-// Step 5: the design keeps a white rim around the cyan tile, but the rim and
-// the padding beyond it are the same white, so the flood fill cannot tell them
-// apart. Offsetting the tile outline directly would also copy every wobble that
-// compression left in it. Instead fit a rounded rectangle to the tile and use
-// that, grown by the rim width, as the silhouette: the shape is exact and its
-// signed distance antialiases the edge.
+// 手順 5: デザインはシアンのタイルの周りに白い縁を残す。縁とその外側の余白は
+// 同じ白なので、塗りつぶしでは区別できない。輪郭をそのままオフセットすると、
+// 圧縮が残した揺れまで写る。タイルに角丸矩形を当て、縁の幅だけ広げたものを
+// 外形にする。形は正確で、符号付き距離が縁をアンチエイリアスする。
 
-// The tile is the largest connected run of non-surround pixels; stray opaque
-// debris in the padding must not widen the bounding box.
+// タイルは余白以外でいちばん大きい連結成分。余白に残った不透明な屑で
+// 外接矩形が広がらないようにする。
 var component = [Int](repeating: -1, count: w * h)
 var bestComponent = -1, bestSize = 0
 var nextLabel = 0
@@ -203,7 +198,7 @@ for y in 0..<h {
 }
 func inTile(_ x: Int, _ y: Int) -> Bool { component[y * w + x] == bestComponent }
 
-// Signed distance to a rounded rectangle; negative inside.
+// 角丸矩形までの符号付き距離。内側は負。
 func roundedRectDistance(_ px: Double, _ py: Double, minX: Double, minY: Double,
                          maxX: Double, maxY: Double, radius: Double) -> Double {
     let cx = (minX + maxX) / 2, cy = (minY + maxY) / 2
@@ -213,7 +208,7 @@ func roundedRectDistance(_ px: Double, _ py: Double, minX: Double, minY: Double,
     return outside + min(max(qx, qy), 0) - radius
 }
 
-// Pick the corner radius that best reproduces the tile mask.
+// タイルのマスクにいちばん合う角の半径を選ぶ。
 let tileMinX = Double(x0), tileMinY = Double(y0)
 let tileMaxX = Double(x1 + 1), tileMaxY = Double(y1 + 1)
 var tileRadius = 0.0, bestMismatch = Int.max
@@ -233,8 +228,8 @@ for candidate in stride(from: 2.0, through: 40.0, by: 0.5) {
 let rimWidth = 6.0
 let edgeHalo = 3.0
 
-// The rim and tile colours are whatever the palette settled on, so read them
-// back rather than assuming pure white and a fixed cyan.
+// 縁とタイルの色はパレットが落ち着いた値を使う。純白や固定のシアンとは限らないので、
+// 実際の画素から最頻色を読み戻す。
 func modeColor(_ predicate: (Int, Int) -> Bool) -> Color {
     var tally: [Int: Int] = [:]
     for y in 0..<h { for x in 0..<w where predicate(x, y) { tally[indices[y * w + x], default: 0] += 1 } }
@@ -249,12 +244,10 @@ let tileColor = modeColor { x, y in
     return d > -6 && d < -1
 }
 
-// Step 6: compose the output. Without a canvas the result stays at source size;
-// with one, the artwork repeats at the largest integer factor that fits and is
-// centred, leaving transparent padding. Colours come from nearest sampling so
-// every dot keeps hard edges, but both tile edges are taken from the fitted
-// geometry's signed distance at output scale: enlarging therefore does not
-// magnify the wobble compression left along the tile outline, nor stair-step it.
+// 手順 6: 出力を合成する。キャンバスが無ければ元のサイズのまま。
+// あれば収まる最大の整数倍で中央に置き、周りは透明にする。色は最近傍サンプルなので
+// ドットの縁は硬いまま。タイルの内外の縁は、合わせた図形の符号付き距離を
+// 出力スケールで評価する。拡大しても輪郭の揺れは拡大されず、階段にもならない。
 let scale = canvas.map { max(1, min($0 / w, $0 / h)) } ?? 1
 let outW = canvas ?? w, outH = canvas ?? h
 let offX = (outW - w * scale) / 2, offY = (outH - h * scale) / 2
@@ -265,8 +258,8 @@ var clear = 0, partial = 0
 for y in 0..<outH {
     for x in 0..<outW {
         let i = y * outW + x
-        // Distances are measured in source units so the fitted geometry applies;
-        // a ramp of 0.5 source units stays one output pixel wide.
+        // 距離は元画像の単位で測り、合わせた図形をそのまま使う。
+        // 0.5 単位の傾斜は、出力では 1 ピクセル幅のままになる。
         let px = (Double(x - offX) + 0.5) / s, py = (Double(y - offY) + 0.5) / s
         let ramp = 0.5 / s
         let a = max(0, min(1, ramp - roundedRectDistance(
@@ -276,10 +269,8 @@ for y in 0..<outH {
         if a <= 0 { clear += 1 } else if a < 1 { partial += 1 }
         guard a > 0 else { continue }
 
-        // Inside the fitted tile the artwork shows through; outside it the rim.
-        // A band just inside the outline is forced to the tile colour: that is
-        // where the stray white and the light halo of the compressed edge sit,
-        // and the artwork itself never reaches it.
+        // 合わせたタイルの内側は原画、外側は縁の色。輪郭のすぐ内側の帯はタイル色に固定する。
+        // そこにははみ出した白と、圧縮縁の明るいハローがあり、原画自体は届かない。
         let dTile = roundedRectDistance(px, py, minX: tileMinX, minY: tileMinY,
                                         maxX: tileMaxX, maxY: tileMaxY, radius: tileRadius)
         let sx = (x - offX) / scale, sy = (y - offY) / scale
@@ -291,7 +282,7 @@ for y in 0..<outH {
         let c = Color(r: rimColor.r + (art.r - rimColor.r) * tile,
                       g: rimColor.g + (art.g - rimColor.g) * tile,
                       b: rimColor.b + (art.b - rimColor.b) * tile)
-        // Premultiplied, matching the bitmap info used to build the output image.
+        // 出力画像のビットマップと同じ、乗算済みアルファで書く。
         out[i * 4] = UInt8(max(0, min(255, (c.r * a).rounded())))
         out[i * 4 + 1] = UInt8(max(0, min(255, (c.g * a).rounded())))
         out[i * 4 + 2] = UInt8(max(0, min(255, (c.b * a).rounded())))

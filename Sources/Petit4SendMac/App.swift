@@ -11,8 +11,8 @@ struct Petit4SendApp: App {
         WindowGroup("Petit4Send for Mac") { ContentView().frame(minWidth:720,minHeight:540) }
             .windowStyle(.titleBar)
             .commands {
-                // The app has no help book, so the default item would only open
-                // Help Viewer on an empty result. Show HELP.md instead.
+                // ヘルプブックが無いので、既定の項目は空のヘルプビューアを開くだけになる。
+                // 代わりに同梱の HELP.md を別ウィンドウで出す。
                 CommandGroup(replacing: .help) {
                     Button("Petit4Send ヘルプ") { openWindow(id: Petit4SendApp.helpWindowID) }
                         .keyboardShortcut("?", modifiers: .command)
@@ -29,17 +29,14 @@ struct Petit4SendApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular); NSApp.activate(ignoringOtherApps:true)
-        // Xcode builds this package as a bare executable with no Info.plist, so
-        // CFBundleIconFile never applies and the Dock shows a blank icon. Set it
-        // from the bundled icns instead; in dist/Petit4Send.app this is a no-op
-        // beyond matching what the bundle already declares.
+        // Xcode はこのパッケージを Info.plist の無い単体実行ファイルとしてビルドする。
+        // CFBundleIconFile が効かず Dock が空白になるので、同梱 icns を自分で設定する。
+        // dist/Petit4Send.app ではバンドルが既に同じアイコンを宣言しており、ここはそれを重ねるだけ。
         if let url = Bundle.module.url(forResource: "Petit4SendMac", withExtension: "icns"),
            let icon = NSImage(contentsOf: url) {
-            // applicationIconImage only covers the Dock tile. The About panel and
-            // alerts resolve the icon by name instead, and without a bundle that
-            // name is already cached as the enclosing folder's icon. setName is
-            // ignored while the name is taken, so release it from the old image
-            // first.
+            // applicationIconImage が覆うのは Dock タイルだけ。情報パネルと警告は名前でアイコンを引く。
+            // バンドルが無いとその名前は、親フォルダのアイコンとして既にキャッシュされている。
+            // 名前が使用中だと setName は無視されるので、先に古い画像から外す。
             NSImage(named: NSImage.applicationIconName)?.setName(nil)
             icon.setName(NSImage.applicationIconName)
             NSApp.applicationIconImage = icon
@@ -47,6 +44,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 }
+/// 送信タブと画像復元タブの状態。画面の更新はメインアクターに限定する。
 @MainActor final class Model: ObservableObject {
     @Published var file: URL?
     @Published var filename = ""
@@ -62,12 +60,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @Published var imageStatus = "SwitchのSCREENSHOT SENDで保存した画像を追加してください。"
     @Published var imageBusy = false
     private var cancellation: Cancellation?
+    /// ポート一覧を読み直す。今の選択が消えていれば先頭を選ぶ。
     func refresh() { ports = SerialPort.available(); if !ports.contains(port) { port = ports.first ?? "" } }
+    /// 送信ファイルを選ぶ。Switch 側の名前の初期値は、拡張子込みで大文字化した 32 文字。
     func chooseFile() {
         let panel = NSOpenPanel(); panel.canChooseDirectories = false
         if panel.runModal() == .OK, let url = panel.url { file = url; filename = String(url.lastPathComponent.uppercased().prefix(32)) }
     }
+    /// 進行中の送受信へ中止を知らせる。実際に止まるのはシリアル側の次の区切り。
     func stop() { cancellation?.cancel(); status = "中止処理中…" }
+    /// DETECT SYNC KEY 画面向けに、約 4 秒の検出信号を送る。値そのものは Switch が表示する。
     func detectSyncKey() {
         guard !busy, !port.isEmpty else { return }
         let path = port, token = Cancellation()
@@ -89,6 +91,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             busy = false; cancellation = nil
         }
     }
+    /// ファイルを種別に合わせてバイト列にし、HID レポートとして送る。
+    /// TXT は UTF-8 または BOM 付き UTF-16 を、BOM なし UTF-16LE にする。
+    /// DAT はそのまま、GRP は乗算前アルファを保った行優先 BGRA で、幅と高さはヘッダーへ出す。
     func send() {
         guard let file else { return }
         let kind = kind, mode = compression, name = filename, path = port, sync = syncKey
@@ -116,7 +121,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     let stream = try USBProtocol.stream(bytes:bytes,name:name,kind:kind,compression:mode,width:width,height:height)
                     let reports = try HIDReports(stream,syncKey:sync)
                     let originalCount = bytes.count
-                    // Switch shows the payload length field at stream offset 112, not the full stream length.
+                    // Switch が表示するのはストリーム全長ではなく、オフセット 112 のペイロード長。
+                    // 秒数は実効 296 バイト/秒とした概算で、ヘッダー込みの長さから出している。
                     let payloadCount = Codec.integer(stream, 112, 4)
                     await MainActor.run { self.status = "送信中: \(originalCount) バイト → 本体 \(payloadCount) バイト（ヘッダー込み \(stream.count) バイト、約\(Int(Double(stream.count)/296))秒）" }
                     try SerialPort.send(path:path,reports:reports,cancellation:token) { value in
@@ -128,6 +134,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             busy = false; cancellation = nil
         }
     }
+    /// スクリーンショットを順不同で追加する。ページ番号は画像内のヘッダーから取る。
     func addImages() {
         let panel = NSOpenPanel(); panel.allowsMultipleSelection = true; panel.allowedContentTypes = [.png,.jpeg,.bmp,.tiff]
         if panel.runModal() != .OK { return }
@@ -146,9 +153,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             imageBusy = false
         }
     }
+    /// 同一ファイルのページを名前順にまとめる。枚数が足りない組も一覧には残す。
     var groups: [[ScreenshotPage]] {
         Dictionary(grouping:pages,by: { $0.groupKey }).values.sorted { $0[0].name < $1[0].name }
     }
+    /// 揃った組だけ保存する。不足や CRC 不一致は、その組のエラー文として状態欄に出す。
     func saveImages() {
         let panel = NSOpenPanel(); panel.canChooseFiles = false; panel.canChooseDirectories = true; panel.canCreateDirectories = true
         panel.prompt = "保存先を選択"
@@ -164,6 +173,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 extension Cancellation {
+    /// シリアルを開く前の準備中に使う中止。まだ Switch へは何も送っていない。
     func checkForUI() throws { if isCancelled { throw TransferError("中止しました。") } }
 }
 struct ContentView: View {
