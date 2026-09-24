@@ -8,7 +8,7 @@ struct Petit4SendApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
     @Environment(\.openWindow) private var openWindow
     var body: some Scene {
-        WindowGroup("Petit4Send for Mac") { ContentView().frame(minWidth:720,minHeight:540) }
+        WindowGroup("Petit4Send for Mac") { ContentView().frame(minWidth:780,minHeight:600) }
             .windowStyle(.titleBar)
             .commands {
                 // ヘルプブックが無いので、既定の項目は空のヘルプビューアを開くだけになる。
@@ -184,7 +184,7 @@ struct ContentView: View {
                 Image(systemName:"arrow.left.arrow.right.square").font(.largeTitle).foregroundStyle(.blue)
                 VStack(alignment:.leading) {
                     Text("Petit4Send").font(.title.bold())
-                    Text("Mac ↔ プチコン4 • P4SEND 1.2.2互換").foregroundStyle(.secondary)
+                    Text("Mac ↔ プチコン4 • P4SEND 1.2.2互換").font(.system(size: 16)).foregroundStyle(.secondary)
                 }
                 Spacer()
             }
@@ -197,10 +197,10 @@ struct ContentView: View {
                         GridRow { Text("Switch側の名前"); TextField("半角ASCII・32文字以内",text:$model.filename) }
                         GridRow { Text("圧縮"); Picker("圧縮",selection:$model.compression) { ForEach(Compression.allCases,id:\.self) { Text($0.rawValue).tag($0) } }.labelsHidden() }
                         GridRow { Text("ポート"); HStack { Picker("ポート",selection:$model.port) { Text("選択してください").tag(""); ForEach(model.ports,id:\.self) { Text($0).tag($0) } }.labelsHidden(); Button("更新",action:model.refresh) } }
-                        GridRow { Text("Sync Key"); HStack { Stepper(value:$model.syncKey,in:-1...24) { Text(model.syncKey == -1 ? "自動 (-1)" : "\(model.syncKey)") }; Button("Detect Sync Key", action:model.detectSyncKey).disabled(model.port.isEmpty); Text("Switchの検出値を指定。").font(.caption).foregroundStyle(.secondary) } }
+                        GridRow { Text("Sync Key"); HStack { Stepper(value:$model.syncKey,in:-1...24) { Text(model.syncKey == -1 ? "自動 (-1)" : "\(model.syncKey)") }; Button("Detect Sync Key", action:model.detectSyncKey).disabled(model.port.isEmpty); Text("Switchの検出値を指定。").font(.system(size: 14)).foregroundStyle(.secondary) } }
                     }.disabled(model.busy)
-                    Text("検出時はSwitchで DETECT SYNC KEY を選んでから、Detect Sync Keyを押してください（約4秒）。").font(.caption).foregroundStyle(.secondary)
-                    Text("TXT: UTF-8 / UTF-16 → UTF-16LE　 DAT: バイナリ　 GRP: 画像 → BGRA").font(.caption).foregroundStyle(.secondary)
+                    Text("検出時はSwitchで DETECT SYNC KEY を選んでから、Detect Sync Keyを押してください（約4秒）。").font(.system(size: 14)).foregroundStyle(.secondary)
+                    Text("TXT: UTF-8 / UTF-16 → UTF-16LE　 DAT: バイナリ　 GRP: 画像 → BGRA").font(.system(size: 14)).foregroundStyle(.secondary)
                     ProgressView(value:model.progress)
                     HStack { Button("Switchへ送信",action:model.send).buttonStyle(.borderedProminent).disabled(model.busy || model.file == nil || model.port.isEmpty); Button("中止",action:model.stop).disabled(!model.busy); Spacer(); Text("9600 bps · 8N1").foregroundStyle(.secondary) }
                     Text(model.status).textSelection(.enabled).frame(maxWidth:.infinity,alignment:.leading)
@@ -214,16 +214,20 @@ struct ContentView: View {
                             let first = pages[0]
                             let count = Set(pages.map(\.index)).count
                             VStack(alignment:.leading,spacing:5) {
-                                HStack { Text(first.name).font(.headline); Spacer(); Text("\(count) / \(first.total) 枚").foregroundStyle(count == first.total ? .green : .orange) }
-                                Text("\(first.fileSize) bytes · \(first.compression == 1 ? "LZSS" : "無圧縮") · CRC \(String(format:"%04X",first.crc))").font(.caption).foregroundStyle(.secondary)
+                                HStack { Text(first.name).font(.system(size: 16, weight: .semibold)); Spacer(); Text("\(count) / \(first.total) 枚").foregroundStyle(count == first.total ? .green : .orange) }
+                                Text("\(first.fileSize) bytes · \(first.compression == 1 ? "LZSS" : "無圧縮") · CRC \(String(format:"%04X",first.crc))").font(.system(size: 14)).foregroundStyle(.secondary)
                             }.padding(.vertical,4)
                         }
                     }
                     if model.imageBusy { ProgressView() }
-                    ScrollView { Text(model.imageStatus).frame(maxWidth:.infinity,alignment:.leading).textSelection(.enabled) }.frame(height:90)
-                    Text("TXTはUTF-8、GRPはPNG、DATはバイナリで保存します。同名ファイルは連番で保存します。").font(.caption).foregroundStyle(.secondary)
+                    ScrollView { Text(model.imageStatus).frame(maxWidth:.infinity,alignment:.leading).textSelection(.enabled) }.frame(height:110)
+                    Text("TXTはUTF-8、GRPはPNG、DATはバイナリで保存します。同名ファイルは連番で保存します。").font(.system(size: 14)).foregroundStyle(.secondary)
                 }.padding().tabItem { Label("画像から復元",systemImage:"photo.on.rectangle") }
             }
-        }.padding(20).onAppear { model.refresh() }
+        }
+        .font(.system(size: 16))
+        .controlSize(.large)
+        .padding(20)
+        .onAppear { model.refresh() }
     }
 }

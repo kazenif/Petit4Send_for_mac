@@ -24,6 +24,7 @@ struct HelpView: View {
             .padding(.vertical, 28)
             .frame(maxWidth: 760, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .center)
+            .font(.system(size: 16))
             .textSelection(.enabled)
         }
     }
@@ -33,7 +34,7 @@ struct HelpView: View {
         switch block.kind {
         case .header(let level):
             Text(block.text)
-                .font(.system(size: [26.0, 20.0, 17.0][min(level, 3) - 1], weight: .semibold))
+                .font(.system(size: [30.0, 23.0, 20.0][min(level, 3) - 1], weight: .semibold))
                 // 見出しは直後の本文と組なので、空きは上を大きくする。
                 // 先頭ブロックはウィンドウ上端の余白をさらに押し下げない。
                 .padding(.top, block.isFirst ? 0 : (level == 1 ? 0 : 28))
@@ -150,7 +151,7 @@ struct HelpView: View {
             .map(\.range)
         var result = text
         for range in ranges {
-            result[range].font = .system(.body, design: .monospaced)
+            result[range].font = .system(size: 16, design: .monospaced)
             result[range].backgroundColor = Color.secondary.opacity(0.14)
         }
         return result
