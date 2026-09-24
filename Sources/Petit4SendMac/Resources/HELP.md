@@ -1,6 +1,7 @@
 # Petit4Send for Mac
 
-Petit4Sendの主要なファイル転送機能をSwift / SwiftUIで再実装したMacアプリです。
+Petit4Sendの主要なファイル転送機能をSwift / SwiftUIで再実装したMacアプリです。 
+GitHub: [https://github.com/kazenif/Petit4Send_for_mac](https://github.com/kazenif/Petit4Send_for_mac)
 
 Petit4Sendオリジナル: [Rei HOBARA / REI SOFTWARE](http://rei.to/petit4send.html)。
 

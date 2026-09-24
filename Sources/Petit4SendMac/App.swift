@@ -11,6 +11,15 @@ struct Petit4SendApp: App {
         WindowGroup("Petit4Send for Mac") { ContentView().frame(minWidth:780,minHeight:600) }
             .windowStyle(.titleBar)
             .commands {
+                // 単体実行では Info.plist が無く、About の名前は Petit4SendMac だけになる。
+                // その直下の行に、P4SEND との対応を出す。数字だけの版数だと「Version」が付くので、文言そのものを渡す。
+                CommandGroup(replacing: .appInfo) {
+                    Button("About \(ProcessInfo.processInfo.processName)") {
+                        NSApp.orderFrontStandardAboutPanel(options: [
+                            .applicationVersion: "1.2.2 互換"
+                        ])
+                    }
+                }
                 // ヘルプブックが無いので、既定の項目は空のヘルプビューアを開くだけになる。
                 // 代わりに同梱の HELP.md を別ウィンドウで出す。
                 CommandGroup(replacing: .help) {
@@ -55,9 +64,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @Published var syncKey = -1
     @Published var busy = false
     @Published var progress = 0.0
-    @Published var status = "ファイルとシリアルポートを選択してください。"
+    /// ファイル送信中だけ入る残り秒数。検出中や準備中は nil。
+    @Published var remainingSeconds: Int?
+    @Published var status = "ファイルとシリアルポートを選択してください"
     @Published var pages: [ScreenshotPage] = []
-    @Published var imageStatus = "SwitchのSCREENSHOT SENDで保存した画像を追加してください。"
+    @Published var imageStatus = "SwitchのSCREENSHOT SENDで保存した画像を追加してください"
     @Published var imageBusy = false
     private var cancellation: Cancellation?
     /// ポート一覧を読み直す。今の選択が消えていれば先頭を選ぶ。
@@ -73,8 +84,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func detectSyncKey() {
         guard !busy, !port.isEmpty else { return }
         let path = port, token = Cancellation()
-        cancellation = token; busy = true; progress = 0
-        status = "Sync Key検出中… SwitchのDETECT SYNC KEY画面を確認してください。"
+        cancellation = token; busy = true; progress = 0; remainingSeconds = nil
+        status = "Sync Key検出中… SwitchのDETECT SYNC KEY画面を確認してください"
         Task {
             do {
                 try await Task.detached {
@@ -82,7 +93,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         Task { @MainActor in self.progress = value }
                     }
                 }.value
-                status = "検出信号の送信終了。Switchに表示された0〜24の値をSync Keyに設定し、Bボタンで戻ってUSB RECEIVEを選んでください。"
+                status = "検出信号の送信終了。Switchの表示値をSync Keyに設定後、Bボタンで戻りUSB RECEIVEを選択"
             } catch {
                 status = token.isCancelled
                     ? "検出を中止しました。Switch側はBボタンで戻れます。停止信号が届かず検出が続く場合はUSBを接続し直してください。"
@@ -97,7 +108,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func send() {
         guard let file else { return }
         let kind = kind, mode = compression, name = filename, path = port, sync = syncKey
-        let token = Cancellation(); cancellation = token; busy = true; progress = 0; status = "送信データを準備しています…"
+        let token = Cancellation(); cancellation = token; busy = true; progress = 0; remainingSeconds = nil; status = "送信データを準備しています…"
         Task {
             do {
                 try await Task.detached {
@@ -124,14 +135,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     // Switch が表示するのはストリーム全長ではなく、オフセット 112 のペイロード長。
                     // 秒数は実効 296 バイト/秒とした概算で、ヘッダー込みの長さから出している。
                     let payloadCount = Codec.integer(stream, 112, 4)
-                    await MainActor.run { self.status = "送信中: \(originalCount) バイト → 本体 \(payloadCount) バイト（ヘッダー込み \(stream.count) バイト、約\(Int(Double(stream.count)/296))秒）" }
+                    let totalSeconds = Int(Double(stream.count)/296)
+                    await MainActor.run {
+                        self.status = "送信中: \(originalCount) バイト → 本体 \(payloadCount) バイト（ヘッダー込み \(stream.count) バイト、約\(totalSeconds)秒）"
+                        self.remainingSeconds = totalSeconds
+                    }
                     try SerialPort.send(path:path,reports:reports,cancellation:token) { value in
-                        Task { @MainActor in self.progress = value }
+                        let left = Int(Double(totalSeconds) * (1 - value))
+                        Task { @MainActor in
+                            self.progress = value
+                            self.remainingSeconds = max(0, left)
+                        }
                     }
                 }.value
-                status = "送信終了。Switch側でCRC結果を確認し、Aボタンで保存してください。"
+                status = "送信終了。Switch側でCRC結果を確認し、Aボタンで保存してください"
             } catch { status = error.localizedDescription }
-            busy = false; cancellation = nil
+            busy = false; remainingSeconds = nil; cancellation = nil
         }
     }
     /// スクリーンショットを順不同で追加する。ページ番号は画像内のヘッダーから取る。
@@ -178,6 +197,7 @@ extension Cancellation {
 }
 struct ContentView: View {
     @StateObject private var model = Model()
+    @FocusState private var syncKeyFocused: Bool
     var body: some View {
         VStack(alignment:.leading,spacing:16) {
             HStack {
@@ -190,18 +210,62 @@ struct ContentView: View {
             }
             TabView {
                 VStack(alignment:.leading,spacing:16) {
-                    Text("Switchで USB RECEIVE を開き、WAITING FILE… の状態にしてください。")
-                    HStack { Button("ファイルを選択…",action:model.chooseFile); Text(model.file?.lastPathComponent ?? "未選択").lineLimit(1); Spacer() }
+                    Grid(alignment:.leading,horizontalSpacing:16,verticalSpacing:8) {
+                        GridRow(alignment:.center) {
+                            Text("ポート")
+                            HStack { Picker("ポート",selection:$model.port) { Text("選択してください").tag(""); ForEach(model.ports,id:\.self) { Text($0).tag($0) } }.labelsHidden(); Button("更新",action:model.refresh) }
+                                .disabled(model.busy)
+                        }
+                        GridRow {
+                            Color.clear.frame(width:0,height:0)
+                            Text("Petit4Send i/Fケーブルを接続した際に、新たに現れるポートを設定して下さい").font(.system(size: 14)).foregroundStyle(.secondary)
+                        }
+                    }
+                    Grid(alignment:.leading,horizontalSpacing:16,verticalSpacing:8) {
+                        GridRow(alignment:.center) {
+                            Text("Sync Key")
+                            HStack {
+                                TextField("−1", value: $model.syncKey, format: .number.grouping(.never))
+                                    .focused($syncKeyFocused)
+                                    .frame(width: 44)
+                                    .onChange(of: syncKeyFocused) { focused in
+                                        if !focused { model.syncKey = min(24, max(-1, model.syncKey)) }
+                                    }
+                                Stepper("Sync Key", value: $model.syncKey, in: -1...24).labelsHidden()
+                                Button("Detect Sync Key", action: model.detectSyncKey).disabled(model.port.isEmpty)
+                                Text("−1〜24。−1 は自動").font(.system(size: 14)).foregroundStyle(.secondary)
+                            }.disabled(model.busy)
+                        }
+                        GridRow {
+                            Color.clear.frame(width:0,height:0)
+                            Text("検出時はSwitchで DETECT SYNC KEY を選んでから、Detect Sync Keyを押してください（約4秒）").font(.system(size: 14)).foregroundStyle(.secondary)
+                        }
+                    }
                     Grid(alignment:.leading,horizontalSpacing:16,verticalSpacing:12) {
+                        GridRow {
+                            Text("ファイル名")
+                            HStack {
+                                TextField("未選択", text: Binding(get: { model.file?.lastPathComponent ?? "未選択" }, set: { _ in }))
+                                    .allowsHitTesting(false)
+                                Button("ファイル選択", action: model.chooseFile)
+                            }
+                        }
                         GridRow { Text("種類"); Picker("種類",selection:$model.kind) { ForEach(FileKind.allCases,id:\.self) { Text($0.rawValue).tag($0) } }.labelsHidden() }
                         GridRow { Text("Switch側の名前"); TextField("半角ASCII・32文字以内",text:$model.filename) }
                         GridRow { Text("圧縮"); Picker("圧縮",selection:$model.compression) { ForEach(Compression.allCases,id:\.self) { Text($0.rawValue).tag($0) } }.labelsHidden() }
-                        GridRow { Text("ポート"); HStack { Picker("ポート",selection:$model.port) { Text("選択してください").tag(""); ForEach(model.ports,id:\.self) { Text($0).tag($0) } }.labelsHidden(); Button("更新",action:model.refresh) } }
-                        GridRow { Text("Sync Key"); HStack { Stepper(value:$model.syncKey,in:-1...24) { Text(model.syncKey == -1 ? "自動 (-1)" : "\(model.syncKey)") }; Button("Detect Sync Key", action:model.detectSyncKey).disabled(model.port.isEmpty); Text("Switchの検出値を指定。").font(.system(size: 14)).foregroundStyle(.secondary) } }
                     }.disabled(model.busy)
-                    Text("検出時はSwitchで DETECT SYNC KEY を選んでから、Detect Sync Keyを押してください（約4秒）。").font(.system(size: 14)).foregroundStyle(.secondary)
                     Text("TXT: UTF-8 / UTF-16 → UTF-16LE　 DAT: バイナリ　 GRP: 画像 → BGRA").font(.system(size: 14)).foregroundStyle(.secondary)
-                    ProgressView(value:model.progress)
+                    VStack(alignment:.trailing,spacing:2) {
+                        ProgressView(value:model.progress).frame(maxWidth:.infinity)
+                        if let seconds = model.remainingSeconds {
+                            HStack(spacing:0) {
+                                Text("残り ")
+                                Text("\(seconds)").font(.system(size: 14, design: .monospaced))
+                                Text(" 秒")
+                            }.font(.system(size: 14)).foregroundStyle(Color(red: 0, green: 0, blue: 0))
+                        }
+                    }
+                    Text("Switchで USB RECEIVE を開き、WAITING FILE… の状態にしてください").font(.system(size: 14))
                     HStack { Button("Switchへ送信",action:model.send).buttonStyle(.borderedProminent).disabled(model.busy || model.file == nil || model.port.isEmpty); Button("中止",action:model.stop).disabled(!model.busy); Spacer(); Text("9600 bps · 8N1").foregroundStyle(.secondary) }
                     Text(model.status).textSelection(.enabled).frame(maxWidth:.infinity,alignment:.leading)
                     Spacer(minLength:0)
