@@ -55,6 +55,19 @@ final class ProtocolTests: XCTestCase {
         XCTAssertNotNil(USBProtocol.switchNameError(String(repeating:"A",count:33)))
         XCTAssertNotNil(USBProtocol.switchNameError("A:B"))
     }
+    /// ファイル選択の直後にだけ使う拡張子と種類の対応。該当しなければ nil。
+    func testKindInferenceFromExtension() {
+        XCTAssertEqual(FileKind.inferred(pathExtension: "txt"), .text)
+        XCTAssertEqual(FileKind.inferred(pathExtension: "PRG"), .text)
+        for ext in ["font", "DAT", "cmt", "D88", "bin"] {
+            XCTAssertEqual(FileKind.inferred(pathExtension: ext), .data, ext)
+        }
+        for ext in ["jpg", "PNG", "jpeg"] {
+            XCTAssertEqual(FileKind.inferred(pathExtension: ext), .graphics, ext)
+        }
+        XCTAssertNil(FileKind.inferred(pathExtension: "zip"))
+        XCTAssertNil(FileKind.inferred(pathExtension: ""))
+    }
     /// P4SEND122.PRG の `@RECEIVE` と同じ組み合わせ和でビット列を戻す。
     /// Sync Key 12 のコマンドは `2 + 4 * 12 = 50`。範囲外の Sync Key は拒否する。
     func testHIDReportsAgainstSwitchReceiver() throws {

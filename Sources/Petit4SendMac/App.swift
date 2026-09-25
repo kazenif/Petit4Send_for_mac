@@ -164,7 +164,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// 送信ファイルを選ぶ。Switch 側の名前の初期値は、拡張子込みで大文字化した 32 文字。
     func chooseFile() {
         let panel = NSOpenPanel(); panel.canChooseDirectories = false
-        if panel.runModal() == .OK, let url = panel.url { file = url; filename = String(USBProtocol.asciiUppercased(url.lastPathComponent).prefix(32)); updateSelectionStatus() }
+        if panel.runModal() == .OK, let url = panel.url {
+            file = url
+            filename = String(USBProtocol.asciiUppercased(url.lastPathComponent).prefix(32))
+            if let inferred = FileKind.inferred(pathExtension: url.pathExtension) { kind = inferred }
+            updateSelectionStatus()
+        }
     }
     /// 進行中の送受信へ中止を知らせる。実際に止まるのはシリアル側の次の区切り。
     func stop() { cancellation?.cancel(); status = "中止処理中…" }

@@ -3,7 +3,19 @@ import Foundation
 /// 圧縮の選び方。自動は LZSS 結果が元より短いときだけ圧縮する。
 public enum Compression: String, CaseIterable { case auto = "自動", lzss = "LZSS", none = "無圧縮" }
 /// ストリーム先頭の 4 バイト種別。TXT はテキスト、DAT は生バイト、GRP は画像。
-public enum FileKind: String, CaseIterable { case text = "TXT:", data = "DAT:", graphics = "GRP:" }
+public enum FileKind: String, CaseIterable {
+    case text = "TXT:", data = "DAT:", graphics = "GRP:"
+    /// ファイルを選んだ直後に使う種類。該当しない拡張子は nil で、今の設定を残す。
+    /// 比較は大文字小文字を区別しない。
+    public static func inferred(pathExtension: String) -> FileKind? {
+        switch USBProtocol.asciiUppercased(pathExtension) {
+        case "TXT", "PRG": return .text
+        case "FONT", "DAT", "CMT", "D88", "BIN": return .data
+        case "JPG", "PNG", "JPEG": return .graphics
+        default: return nil
+        }
+    }
+}
 
 /// ファイル本体を P4SEND 1.2.2 の USB バイトストリームと HID レポートにする。
 public enum USBProtocol {
