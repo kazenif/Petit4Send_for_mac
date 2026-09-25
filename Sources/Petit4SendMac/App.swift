@@ -282,6 +282,7 @@ extension Cancellation {
 struct ContentView: View {
     @StateObject private var model = Model()
     @FocusState private var syncKeyFocused: Bool
+    @State private var fieldHeight: CGFloat = 0
     var body: some View {
         VStack(alignment:.leading,spacing:16) {
             HStack {
@@ -325,13 +326,12 @@ struct ContentView: View {
                         GridRow {
                             Text("ファイル名").padding(.top, 8)
                             HStack {
-                                TextField("未選択", text: Binding(get: { model.file?.lastPathComponent ?? "未選択" }, set: { _ in }))
-                                    .allowsHitTesting(false)
+                                SizedTextField(text: Binding(get: { model.file?.lastPathComponent ?? "未選択" }, set: { _ in }), placeholder: "未選択", height: fieldHeight, editable: false)
                                 Button("ファイル選択", action: model.chooseFile)
                             }.padding(.top, 8)
                         }
-                        GridRow { Text("種類"); Picker("種類",selection:$model.kind) { ForEach(FileKind.allCases,id:\.self) { Text($0.rawValue).tag($0) } }.labelsHidden() }
-                        GridRow { Text("Switch側の名前"); TextField("半角ASCII・32文字以内",text:$model.filename) }
+                        GridRow { Text("種類"); Picker("種類",selection:$model.kind) { ForEach(FileKind.allCases,id:\.self) { Text($0.rawValue).tag($0) } }.labelsHidden().background { GeometryReader { proxy in Color.clear.preference(key: FieldHeightKey.self, value: proxy.size.height) } } }
+                        GridRow { Text("Switch側の名前"); SizedTextField(text: $model.filename, placeholder: "半角ASCII・32文字以内", height: fieldHeight, editable: true) }
                         GridRow {
                             Color.clear.frame(width:0,height:0)
                             Text(USBProtocol.switchNameError(model.filename) ?? USBProtocol.switchNameRule)
@@ -344,6 +344,7 @@ struct ContentView: View {
                             Text("TXT: UTF-8 / UTF-16 → UTF-16LE　 DAT: バイナリ　 GRP: 画像 → BGRA").font(.system(size: 14)).foregroundStyle(.secondary).padding(.top, 8)
                         }
                     }.disabled(model.busy)
+                    .onPreferenceChange(FieldHeightKey.self) { fieldHeight = $0 }
                     VStack(alignment:.trailing,spacing:2) {
                         ProgressView(value:model.progress).frame(maxWidth:.infinity)
                         if let seconds = model.remainingSeconds {
@@ -382,5 +383,64 @@ struct ContentView: View {
         .controlSize(.large)
         .padding(20)
         .onAppear { model.restoreRememberedPort(); model.watchPorts(); model.refresh() }
+    }
+}
+/// 種類ポップアップの高さを、テキスト欄へ合わせるために渡す。
+private struct FieldHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
+}
+/// SwiftUI の `TextField` は高さを指定しても枠が伸びない。AppKit の枠を種類欄と同じ高さで描く。
+private struct SizedTextField: NSViewRepresentable {
+    @Binding var text: String
+    var placeholder: String
+    var height: CGFloat
+    var editable: Bool
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeCoordinator() -> Coordinator { Coordinator(text: $text) }
+    func makeNSView(context: Context) -> FixedHeightTextField {
+        let field = FixedHeightTextField()
+        field.isBezeled = true
+        field.bezelStyle = .roundedBezel
+        field.controlSize = .large
+        field.font = .systemFont(ofSize: 16)
+        field.usesSingleLineMode = true
+        field.lineBreakMode = .byTruncatingTail
+        field.cell?.isScrollable = true
+        field.delegate = context.coordinator
+        field.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        return field
+    }
+    func updateNSView(_ field: FixedHeightTextField, context: Context) {
+        context.coordinator.text = $text
+        if field.stringValue != text { field.stringValue = text }
+        field.placeholderString = placeholder
+        field.fixedHeight = height
+        field.isEditable = editable && isEnabled
+        field.isSelectable = editable && isEnabled
+        field.isEnabled = isEnabled
+        field.refusesFirstResponder = !editable
+    }
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: FixedHeightTextField, context: Context) -> CGSize? {
+        let width = proposal.width ?? nsView.intrinsicContentSize.width
+        let measured = height > 0 ? height : nsView.intrinsicContentSize.height
+        return CGSize(width: width, height: measured)
+    }
+    final class Coordinator: NSObject, NSTextFieldDelegate {
+        var text: Binding<String>
+        init(text: Binding<String>) { self.text = text }
+        func controlTextDidChange(_ notification: Notification) {
+            guard let field = notification.object as? NSTextField else { return }
+            text.wrappedValue = field.stringValue
+        }
+    }
+}
+private final class FixedHeightTextField: NSTextField {
+    var fixedHeight: CGFloat = 0 { didSet { if oldValue != fixedHeight { invalidateIntrinsicContentSize() } } }
+    override var intrinsicContentSize: NSSize {
+        var size = super.intrinsicContentSize
+        if fixedHeight > 0 { size.height = fixedHeight }
+        return size
     }
 }
