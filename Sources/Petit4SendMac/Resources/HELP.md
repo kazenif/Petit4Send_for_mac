@@ -1,6 +1,6 @@
 # Petit4Send for Mac
 
-version 1.0.0 - pre-release
+version 1.0.0
 
 Petit4Sendの主要なファイル転送機能をSwift / SwiftUIで再実装したMacアプリです。 
 GitHub: [https://github.com/kazenif/Petit4Send_for_mac](https://github.com/kazenif/Petit4Send_for_mac)
