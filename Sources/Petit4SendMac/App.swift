@@ -141,11 +141,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         port = SerialPort.choose(previous: ports, current: current, selected: port)
         ports = current
         if !port.isEmpty { UserDefaults.standard.set(port, forKey: Self.rememberedPortKey) }
+        updateSelectionStatus()
+    }
+    /// 送信や検出の結果表示中は触らない。選択の案内を出しているあいだだけ、いまの選択に合わせる。
+    func updateSelectionStatus() {
+        guard !busy else { return }
+        let namePrompt = USBProtocol.switchNameError("") ?? ""
+        let prompts = [
+            "ファイルとシリアルポートを選択してください",
+            "ファイルを選択してください",
+            "シリアルポートを選択してください",
+            "送信できます",
+            namePrompt,
+        ]
+        guard prompts.contains(status) else { return }
+        if file == nil, port.isEmpty { status = prompts[0] }
+        else if file == nil { status = prompts[1] }
+        else if port.isEmpty { status = prompts[2] }
+        else if let message = USBProtocol.switchNameError(filename) { status = message }
+        else { status = prompts[3] }
     }
     /// 送信ファイルを選ぶ。Switch 側の名前の初期値は、拡張子込みで大文字化した 32 文字。
     func chooseFile() {
         let panel = NSOpenPanel(); panel.canChooseDirectories = false
-        if panel.runModal() == .OK, let url = panel.url { file = url; filename = String(USBProtocol.asciiUppercased(url.lastPathComponent).prefix(32)) }
+        if panel.runModal() == .OK, let url = panel.url { file = url; filename = String(USBProtocol.asciiUppercased(url.lastPathComponent).prefix(32)); updateSelectionStatus() }
     }
     /// 進行中の送受信へ中止を知らせる。実際に止まるのはシリアル側の次の区切り。
     func stop() { cancellation?.cancel(); status = "中止処理中…" }
@@ -383,6 +402,8 @@ struct ContentView: View {
         .controlSize(.large)
         .padding(20)
         .onAppear { model.restoreRememberedPort(); model.watchPorts(); model.refresh() }
+        .onChange(of: model.port) { _, _ in model.updateSelectionStatus() }
+        .onChange(of: model.filename) { _, _ in model.updateSelectionStatus() }
     }
 }
 /// 種類ポップアップの高さを、テキスト欄へ合わせるために渡す。
