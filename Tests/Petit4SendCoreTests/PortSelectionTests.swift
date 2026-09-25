@@ -19,4 +19,9 @@ final class PortSelectionTests: XCTestCase {
         let choice = SerialPort.choose(previous: [], current: ["/dev/cu.a", "/dev/cu.b"], selected: "")
         XCTAssertEqual(choice, "")
     }
+    func testRestoresOnlyAPortThatIsPresent() {
+        XCTAssertEqual(SerialPort.restored(saved: "/dev/cu.usbserial", available: ["/dev/cu.Bluetooth", "/dev/cu.usbserial"]), "/dev/cu.usbserial")
+        XCTAssertEqual(SerialPort.restored(saved: "/dev/cu.usbserial", available: ["/dev/cu.Bluetooth"]), "")
+        XCTAssertEqual(SerialPort.restored(saved: "", available: ["/dev/cu.usbserial"]), "")
+    }
 }

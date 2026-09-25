@@ -114,6 +114,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @Published var imageBusy = false
     private var cancellation: Cancellation?
     private var portWatcher: SerialPort.Watcher?
+    private var didRestorePort = false
+    private static let rememberedPortKey = "rememberedSerialPort"
+    /// 起動時だけ、記憶しているポートが一覧にあれば選ぶ。その後の抜き差しは `refresh` の規則に任せる。
+    func restoreRememberedPort() {
+        guard !didRestorePort else { return }
+        didRestorePort = true
+        port = SerialPort.restored(saved: UserDefaults.standard.string(forKey: Self.rememberedPortKey) ?? "", available: ports)
+    }
+    /// 利用者が選んだポートを記憶する。未選択にしたときは記憶を消す。抜き差しで消えた選択はここを通さない。
+    func selectPort(_ path: String) {
+        port = path
+        if path.isEmpty { UserDefaults.standard.removeObject(forKey: Self.rememberedPortKey) }
+        else { UserDefaults.standard.set(path, forKey: Self.rememberedPortKey) }
+    }
     /// `/dev` の変化で一覧を読み直す。送信中でも選択規則だけは同じ。
     func watchPorts() {
         guard portWatcher == nil else { return }
@@ -126,6 +140,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let current = SerialPort.available()
         port = SerialPort.choose(previous: ports, current: current, selected: port)
         ports = current
+        if !port.isEmpty { UserDefaults.standard.set(port, forKey: Self.rememberedPortKey) }
     }
     /// 送信ファイルを選ぶ。Switch 側の名前の初期値は、拡張子込みで大文字化した 32 文字。
     func chooseFile() {
@@ -282,7 +297,7 @@ struct ContentView: View {
                     Grid(alignment:.leading,horizontalSpacing:16,verticalSpacing:8) {
                         GridRow(alignment:.center) {
                             Text("ポート")
-                            HStack { Picker("ポート",selection:$model.port) { Text("選択してください").tag(""); ForEach(model.ports,id:\.self) { Text($0).tag($0) } }.labelsHidden(); Button("更新",action:model.refresh) }
+                            HStack { Picker("ポート",selection:Binding(get:{ model.port }, set:model.selectPort)) { Text("選択してください").tag(""); ForEach(model.ports,id:\.self) { Text($0).tag($0) } }.labelsHidden(); Button("更新",action:model.refresh) }
                                 .disabled(model.busy)
                         }
                         GridRow {
@@ -366,6 +381,6 @@ struct ContentView: View {
         .font(.system(size: 16))
         .controlSize(.large)
         .padding(20)
-        .onAppear { model.watchPorts(); model.refresh() }
+        .onAppear { model.restoreRememberedPort(); model.watchPorts(); model.refresh() }
     }
 }

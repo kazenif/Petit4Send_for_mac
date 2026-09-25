@@ -38,6 +38,10 @@ public enum SerialPort {
         let added = current.filter { !previous.contains($0) }
         return added.count == 1 ? added[0] : ""
     }
+    /// 前回選んだポートが今の一覧にあればそれを返す。無い、または空なら未選択。
+    public static func restored(saved: String, available: [String]) -> String {
+        !saved.isEmpty && available.contains(saved) ? saved : ""
+    }
     /// `/dev` の変化で `onChange` を呼ぶ。`cu.*` の出現と消滅はここから一覧を読み直して知る。
     public final class Watcher: @unchecked Sendable {
         private var source: DispatchSourceFileSystemObject?
