@@ -8,7 +8,7 @@ struct Petit4SendApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
     @Environment(\.openWindow) private var openWindow
     var body: some Scene {
-        WindowGroup("Petit4Send for Mac") { ContentView().frame(minWidth:780,minHeight:700) }
+        WindowGroup("Petit4Send for Mac") { ContentView().frame(minWidth:800,minHeight:640) }
             .windowStyle(.titleBar)
             .commands {
                 // 単体実行では Info.plist が無く、About の名前は Petit4SendMac だけになる。
@@ -289,10 +289,8 @@ struct ContentView: View {
                             Color.clear.frame(width:0,height:0)
                             Text("未選択のときにケーブルを接続すると、増えたポートを選びます。選択中に抜くと未選択に戻ります").font(.system(size: 14)).foregroundStyle(.secondary)
                         }
-                    }
-                    Grid(alignment:.leading,horizontalSpacing:16,verticalSpacing:8) {
                         GridRow(alignment:.center) {
-                            Text("Sync Key")
+                            Text("Sync Key").padding(.top, 8)
                             HStack {
                                 TextField("−1", value: $model.syncKey, format: .number.grouping(.never))
                                     .focused($syncKeyFocused)
@@ -303,21 +301,19 @@ struct ContentView: View {
                                 Stepper("Sync Key", value: $model.syncKey, in: -1...24).labelsHidden()
                                 Button("Detect Sync Key", action: model.detectSyncKey).disabled(model.port.isEmpty)
                                 Text("−1〜24。−1 は自動").font(.system(size: 14)).foregroundStyle(.secondary)
-                            }.disabled(model.busy)
+                            }.disabled(model.busy).padding(.top, 8)
                         }
                         GridRow {
                             Color.clear.frame(width:0,height:0)
                             Text("検出時はSwitchで DETECT SYNC KEY を選んでから、Detect Sync Keyを押してください").font(.system(size: 14)).foregroundStyle(.secondary)
                         }
-                    }
-                    Grid(alignment:.leading,horizontalSpacing:16,verticalSpacing:12) {
                         GridRow {
-                            Text("ファイル名")
+                            Text("ファイル名").padding(.top, 8)
                             HStack {
                                 TextField("未選択", text: Binding(get: { model.file?.lastPathComponent ?? "未選択" }, set: { _ in }))
                                     .allowsHitTesting(false)
                                 Button("ファイル選択", action: model.chooseFile)
-                            }
+                            }.padding(.top, 8)
                         }
                         GridRow { Text("種類"); Picker("種類",selection:$model.kind) { ForEach(FileKind.allCases,id:\.self) { Text($0.rawValue).tag($0) } }.labelsHidden() }
                         GridRow { Text("Switch側の名前"); TextField("半角ASCII・32文字以内",text:$model.filename) }
@@ -328,8 +324,11 @@ struct ContentView: View {
                                 .foregroundStyle(USBProtocol.switchNameError(model.filename) == nil ? AnyShapeStyle(.secondary) : AnyShapeStyle(.orange))
                         }
                         GridRow { Text("圧縮"); Picker("圧縮",selection:$model.compression) { ForEach(Compression.allCases,id:\.self) { Text($0.rawValue).tag($0) } }.labelsHidden() }
+                        GridRow {
+                            Color.clear.frame(width:0,height:0)
+                            Text("TXT: UTF-8 / UTF-16 → UTF-16LE　 DAT: バイナリ　 GRP: 画像 → BGRA").font(.system(size: 14)).foregroundStyle(.secondary).padding(.top, 8)
+                        }
                     }.disabled(model.busy)
-                    Text("TXT: UTF-8 / UTF-16 → UTF-16LE　 DAT: バイナリ　 GRP: 画像 → BGRA").font(.system(size: 14)).foregroundStyle(.secondary)
                     VStack(alignment:.trailing,spacing:2) {
                         ProgressView(value:model.progress).frame(maxWidth:.infinity)
                         if let seconds = model.remainingSeconds {
