@@ -50,6 +50,10 @@ final class ProtocolTests: XCTestCase {
         let lower = try USBProtocol.stream(bytes:bytes,name:"i",kind:.text,compression:.none)
         XCTAssertEqual(String(bytes:lower[67..<72],encoding:.ascii),"TXT:I")
         XCTAssertThrowsError(try USBProtocol.stream(bytes:bytes,name:"ß",kind:.text,compression:.none))
+        XCTAssertNil(USBProtocol.switchNameError("test"))
+        XCTAssertNotNil(USBProtocol.switchNameError(""))
+        XCTAssertNotNil(USBProtocol.switchNameError(String(repeating:"A",count:33)))
+        XCTAssertNotNil(USBProtocol.switchNameError("A:B"))
     }
     /// P4SEND122.PRG の `@RECEIVE` と同じ組み合わせ和でビット列を戻す。
     /// Sync Key 12 のコマンドは `2 + 4 * 12 = 50`。範囲外の Sync Key は拒否する。

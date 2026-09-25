@@ -8,7 +8,7 @@ struct Petit4SendApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
     @Environment(\.openWindow) private var openWindow
     var body: some Scene {
-        WindowGroup("Petit4Send for Mac") { ContentView().frame(minWidth:780,minHeight:600) }
+        WindowGroup("Petit4Send for Mac") { ContentView().frame(minWidth:780,minHeight:700) }
             .windowStyle(.titleBar)
             .commands {
                 // 単体実行では Info.plist が無く、About の名前は Petit4SendMac だけになる。
@@ -321,6 +321,12 @@ struct ContentView: View {
                         }
                         GridRow { Text("種類"); Picker("種類",selection:$model.kind) { ForEach(FileKind.allCases,id:\.self) { Text($0.rawValue).tag($0) } }.labelsHidden() }
                         GridRow { Text("Switch側の名前"); TextField("半角ASCII・32文字以内",text:$model.filename) }
+                        GridRow {
+                            Color.clear.frame(width:0,height:0)
+                            Text(USBProtocol.switchNameError(model.filename) ?? USBProtocol.switchNameRule)
+                                .font(.system(size: 14))
+                                .foregroundStyle(USBProtocol.switchNameError(model.filename) == nil ? AnyShapeStyle(.secondary) : AnyShapeStyle(.orange))
+                        }
                         GridRow { Text("圧縮"); Picker("圧縮",selection:$model.compression) { ForEach(Compression.allCases,id:\.self) { Text($0.rawValue).tag($0) } }.labelsHidden() }
                     }.disabled(model.busy)
                     Text("TXT: UTF-8 / UTF-16 → UTF-16LE　 DAT: バイナリ　 GRP: 画像 → BGRA").font(.system(size: 14)).foregroundStyle(.secondary)
@@ -335,7 +341,7 @@ struct ContentView: View {
                         }
                     }
                     Text("Switchで USB RECEIVE を開き、WAITING FILE… の状態にしてください").font(.system(size: 14))
-                    HStack { Button("Switchへ送信",action:model.send).buttonStyle(.borderedProminent).disabled(model.busy || model.file == nil || model.port.isEmpty); Button("中止",action:model.stop).disabled(!model.busy); Spacer(); Text("9600 bps · 8N1").foregroundStyle(.secondary) }
+                    HStack { Button("Switchへ送信",action:model.send).buttonStyle(.borderedProminent).disabled(model.busy || model.file == nil || model.port.isEmpty || USBProtocol.switchNameError(model.filename) != nil); Button("中止",action:model.stop).disabled(!model.busy); Spacer(); Text("9600 bps · 8N1").foregroundStyle(.secondary) }
                     Text(model.status).textSelection(.enabled).frame(maxWidth:.infinity,alignment:.leading)
                     Spacer(minLength:0)
                 }.padding().tabItem { Label("USB送信",systemImage:"cable.connector") }

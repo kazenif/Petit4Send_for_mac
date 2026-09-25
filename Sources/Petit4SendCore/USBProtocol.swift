@@ -21,8 +21,8 @@ public enum USBProtocol {
     /// `shouldCancel` は LZSS の途中で見る。準備中の中止であり、まだ Switch へは送っていない。
     public static func stream(bytes: [UInt8], name: String, kind: FileKind, compression: Compression, width: Int = 0, height: Int = 0, shouldCancel: () -> Bool = { false }) throws -> [UInt8] {
         guard bytes.count <= Codec.maximumSize else { throw TransferError("上限64 MiBを超えています。") }
+        if let message = switchNameError(name) { throw TransferError(message) }
         let nameBytes = Array(asciiUppercased(name).utf8)
-        guard !nameBytes.isEmpty, nameBytes.count <= 32, nameBytes.allSatisfy({ $0 >= 32 && $0 < 127 && $0 != 58 && $0 != 47 && $0 != 92 }) else { throw TransferError("送信先名は半角ASCII 1〜32文字で指定してください（: / \\ は不可）。") }
         let zipped = compression == .none ? [] : try Codec.compress(bytes, shouldCancel: shouldCancel)
         let useZip = compression == .lzss || (compression == .auto && zipped.count < bytes.count)
         let body = useZip ? zipped : bytes
@@ -38,6 +38,16 @@ public enum USBProtocol {
     static func choose(_ n: Int, _ k: Int) -> UInt64 {
         if n < k { return 0 }; if k == 0 { return 1 }
         return (1...k).reduce(UInt64(1)) { $0 * UInt64(n-$1+1) / UInt64($1) }
+    }
+    /// 送信前に見せる制約。満たせない名前では `switchNameError` が同じ文言を返す。
+    public static let switchNameRule = "半角ASCII 1〜32文字（: / \\ は不可）"
+    /// 大文字化したあと、空・33文字以上・半角ASCII以外・`:` `/` `\` なら送信できない理由を返す。
+    public static func switchNameError(_ name: String) -> String? {
+        let nameBytes = Array(asciiUppercased(name).utf8)
+        guard !nameBytes.isEmpty, nameBytes.count <= 32, nameBytes.allSatisfy({ $0 >= 32 && $0 < 127 && $0 != 58 && $0 != 47 && $0 != 92 }) else {
+            return "送信先名は半角ASCII 1〜32文字で指定してください（: / \\ は不可）。"
+        }
+        return nil
     }
     /// `a`...`z` だけを大文字にする。`String.uppercased()` はロケールによって `i` や `ß` を ASCII の外へ出す。
     public static func asciiUppercased(_ name: String) -> String {
