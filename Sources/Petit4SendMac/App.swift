@@ -12,12 +12,12 @@ struct Petit4SendApp: App {
             .windowStyle(.titleBar)
             .commands {
                 // 単体実行では Info.plist が無く、About の名前は Petit4SendMac だけになる。
-                // その直下の行に、P4SEND との対応を出す。数字だけの版数だと「Version」が付くので、文言そのものを渡す。
+                // その直下の行に、アプリの版数を出す。
                 CommandGroup(replacing: .appInfo) {
                     Button("About \(ProcessInfo.processInfo.processName)") {
                         // version を空にすると、CFBundleVersion の (9) のようなビルド番号を出さない。
                         NSApp.orderFrontStandardAboutPanel(options: [
-                            .applicationVersion: "1.2.2 互換",
+                            .applicationVersion: "1.0.1",
                             .version: ""
                         ])
                     }
@@ -264,14 +264,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// スクリーンショットを順不同で追加する。ページ番号は画像内のヘッダーから取る。
     func addImages() {
         let panel = NSOpenPanel(); panel.allowsMultipleSelection = true; panel.allowedContentTypes = [.png,.jpeg,.bmp,.tiff]
-        if panel.runModal() != .OK { return }
-        let urls = panel.urls; imageBusy = true
+        if panel.runModal() == .OK { loadImages(panel.urls) }
+    }
+    /// 「画像を追加…」と Finder からのドロップの両方から読む。
+    /// フォルダは直下の PNG / JPEG / BMP / TIFF だけを足す。それ以外は読み込まず、状態欄に理由を出す。
+    func loadImages(_ urls: [URL]) {
+        guard !imageBusy, !urls.isEmpty else { return }
+        imageBusy = true
         Task {
-            let results = await Task.detached { urls.map { url -> (ScreenshotPage?, String, String?) in
+            let accessed = urls.filter { $0.startAccessingSecurityScopedResource() }
+            defer { accessed.forEach { $0.stopAccessingSecurityScopedResource() } }
+            let batch = RestoreImages.batch(from: urls)
+            let results = await Task.detached { batch.images.map { url -> (ScreenshotPage?, String, String?) in
                 do { return (try ScreenshotPage.load(url), url.lastPathComponent, nil) }
                 catch { return (nil, url.lastPathComponent, "\(url.lastPathComponent): \(error.localizedDescription)") }
             }}.value
-            var errors: [String] = []
+            var errors = batch.rejected.map { "\($0.lastPathComponent): PNG、JPEG、BMP、TIFFの画像をドロップしてください。" }
             for (page, filename, error) in results {
                 if let page { pages.append(LoadedScreenshot(filename: filename, page: page)) }
                 if let error { errors.append(error) }
@@ -318,6 +326,7 @@ struct ContentView: View {
     @StateObject private var model = Model()
     @FocusState private var syncKeyFocused: Bool
     @State private var fieldHeight: CGFloat = 0
+    @State private var imageDropTargeted = false
     var body: some View {
         VStack(alignment:.leading,spacing:16) {
             HStack {
@@ -396,7 +405,7 @@ struct ContentView: View {
                     Spacer(minLength:0)
                 }.padding().tabItem { Label("USB送信",systemImage:"cable.connector") }
                 VStack(alignment:.leading,spacing:12) {
-                    Text("原寸のスクリーンショットを追加します。分割画像は順不同で選択できます。")
+                    Text("スクリーンショットを追加します。分割画像は順不同で、一覧へドロップしても追加できます。")
                     HStack { Button("画像を追加…",action:model.addImages); Button("一覧をクリア") { model.pages = []; model.imageStatus = "一覧をクリアしました。" }; Spacer(); Button("復元して保存…",action:model.saveImages).buttonStyle(.borderedProminent).disabled(model.pages.isEmpty) }.disabled(model.imageBusy)
                     List {
                         ForEach(model.groups, id: \.first!.page.groupKey) { pages in
@@ -427,6 +436,20 @@ struct ContentView: View {
                                     .font(.system(size: 14))
                                 }
                             }.padding(.vertical, 4)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .contentShape(Rectangle())
+                    .dropDestination(for: URL.self) { urls, _ in
+                        guard !model.imageBusy else { return false }
+                        model.loadImages(urls)
+                        return true
+                    } isTargeted: { imageDropTargeted = $0 }
+                    .overlay {
+                        if imageDropTargeted, !model.imageBusy {
+                            RoundedRectangle(cornerRadius: 6)
+                                .strokeBorder(Color.accentColor, lineWidth: 3)
+                                .allowsHitTesting(false)
                         }
                     }
                     if model.imageBusy { ProgressView() }

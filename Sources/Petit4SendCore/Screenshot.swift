@@ -125,6 +125,36 @@ public struct ScreenshotPage {
     }
 }
 
+/// Finder からのドロップと「画像を追加…」で読むファイルの振り分け。
+/// PNG / JPEG / BMP / TIFF だけを受け、フォルダは直下のその種類だけを足す。
+public enum RestoreImages {
+    public static func batch(from urls: [URL]) -> (images: [URL], rejected: [URL]) {
+        var images: [URL] = []
+        var rejected: [URL] = []
+        for url in urls {
+            var isDirectory: ObjCBool = false
+            let exists = FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory)
+            if exists, isDirectory.boolValue {
+                let children = (try? FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles])) ?? []
+                let files = children.filter { (try? $0.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true }
+                    .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
+                let found = files.filter(isImage)
+                if found.isEmpty { rejected.append(url) } else { images.append(contentsOf: found) }
+            } else if isImage(url), (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true {
+                images.append(url)
+            } else {
+                rejected.append(url)
+            }
+        }
+        return (images, rejected)
+    }
+    /// 拡張子の大文字小文字は問わない。
+    public static func isImage(_ url: URL) -> Bool {
+        guard let type = UTType(filenameExtension: url.pathExtension) else { return false }
+        return [UTType.png, .jpeg, .bmp, .tiff].contains { type.conforms(to: $0) }
+    }
+}
+
 /// 直線（プリマルチプライされていない）RGBA。
 /// GRP のアルファを落とさないため、色管理を通さず 8bit の成分をそのまま読む。
 public struct Raster {

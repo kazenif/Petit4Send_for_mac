@@ -125,6 +125,26 @@ final class ProtocolTests: XCTestCase {
         let second = try page([5,6,7,8], original: original, index: 1, total: 3)
         XCTAssertEqual(ScreenshotPage.missingPageNumbers([first, second, third]), [])
     }
+    /// ドロップは PNG/JPEG/BMP/TIFF と、その直下だけを持つフォルダを受ける。
+    func testRestoreImageDropBatch() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let png = root.appendingPathComponent("page.PNG")
+        let text = root.appendingPathComponent("note.txt")
+        try Data().write(to: png)
+        try Data().write(to: text)
+        let nested = root.appendingPathComponent("nested")
+        try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
+        let inner = nested.appendingPathComponent("b.jpg")
+        let skipped = nested.appendingPathComponent("deeper")
+        try FileManager.default.createDirectory(at: skipped, withIntermediateDirectories: true)
+        try Data().write(to: inner)
+        try Data().write(to: skipped.appendingPathComponent("hidden.png"))
+        let batch = RestoreImages.batch(from: [text, png, nested, root.appendingPathComponent("missing.png")])
+        XCTAssertEqual(batch.images.map(\.lastPathComponent), ["page.PNG", "b.jpg"])
+        XCTAssertEqual(batch.rejected.map(\.lastPathComponent), ["note.txt", "missing.png"])
+    }
     /// UTF-8 と BOM 付き UTF-16 は従来どおり。シフトJISは UTF-8 に読めないときだけ使う。
     func testTextSourceEncodings() throws {
         let text = "PRINT \"日本語\"\r\n"

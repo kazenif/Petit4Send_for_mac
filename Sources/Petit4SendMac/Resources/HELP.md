@@ -3,13 +3,11 @@
 version 1.0.1
 
 Petit4Sendの主要なファイル転送機能をSwift / SwiftUIで再実装したMacアプリです。 
+
 GitHub: [https://github.com/kazenif/Petit4Send_for_mac](https://github.com/kazenif/Petit4Send_for_mac)
 
-Petit4Sendオリジナル: [Rei HOBARA / REI SOFTWARE](http://rei.to/petit4send.html)。
+Petit4Sendオリジナル: [Rei HOBARA / REI SOFTWARE](http://rei.to/petit4send.html)
 
-## 起動
-
-`dist/Petit4Send.app` をFinderでダブルクリックしてください。このフォルダでビルドしたアプリはApple Silicon用、macOS 14以降です。`./build-app.sh` の署名はローカルの ad-hoc 署名です。頒布用の Developer ID 署名と公証は `./build-app-sign.sh` が行い、配るのはその .app です。
 
 ## Mac → Switch
 
@@ -66,7 +64,7 @@ Switch側の名前の初期値は、拡張子込みで大文字にしたファ�
 ## Switch → Mac
 
 1. Switchの `SCREENSHOT SEND` で対象ファイルを選び、表示された全ページをスクリーンショットとして保存します。
-2. Macに画像を取り込み、「画像から復元」→「画像を追加…」で全ページを選択します。ページ順は問いません。
+2. Macに画像を取り込み、「画像から復元」で全ページを選びます。ページ順は問いません。「画像を追加…」でも、ファイル一覧へドロップしても追加できます。フォルダをドロップしたときは、その直下のPNG/JPEG/BMP/TIFFだけを読みます。
 3. ファイルごとの枚数を確認し、「復元して保存…」で保存先フォルダを選びます。
 
 1280×720の原寸スクリーンショット、または左側720×720を原寸で切り出した画像に対応します。拡大縮小、SNS経由の再圧縮、カメラ撮影された画像には対応しません。PNG/JPEG/BMP/TIFFを読み込めますが、JPEGで失われた情報は修復できません。
