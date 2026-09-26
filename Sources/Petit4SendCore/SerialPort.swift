@@ -25,8 +25,26 @@ public final class Cancellation: @unchecked Sendable {
 public enum SerialPort {
     /// 呼び出し側のシリアルポート。`/dev/cu.*` だけを返す。
     /// `tty.*` は待ち受けでオープンがブロックし得るため列挙しない。
+    /// 並びは `usbserial` / `usbmodem` が先。
     public static func available() -> [String] {
-        ((try? FileManager.default.contentsOfDirectory(atPath:"/dev")) ?? []).filter { $0.hasPrefix("cu.") }.sorted().map { "/dev/"+$0 }
+        let found = ((try? FileManager.default.contentsOfDirectory(atPath:"/dev")) ?? []).filter { $0.hasPrefix("cu.") }.map { "/dev/"+$0 }
+        return prioritized(found)
+    }
+    /// 一覧の並び。`usbserial` / `usbmodem` を先にし、グループ内は名前順。
+    /// 大文字小文字は区別しない。それ以外の `cu.*` は後ろに残す。
+    public static func prioritized(_ ports: [String]) -> [String] {
+        ports.sorted { a, b in
+            let ap = isUSBAdapter(a), bp = isUSBAdapter(b)
+            if ap != bp { return ap }
+            let al = a.lowercased(), bl = b.lowercased()
+            if al != bl { return al < bl }
+            return a < b
+        }
+    }
+    /// パスに `usbserial` または `usbmodem` を含む呼び出し側ポート。
+    public static func isUSBAdapter(_ path: String) -> Bool {
+        let name = path.lowercased()
+        return name.contains("usbserial") || name.contains("usbmodem")
     }
     /// 抜き差しのあと、どのポートを選ぶか。
     ///

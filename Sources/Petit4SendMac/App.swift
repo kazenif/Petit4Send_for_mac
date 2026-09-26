@@ -109,7 +109,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// ファイル送信中だけ入る残り秒数。検出中や準備中は nil。
     @Published var remainingSeconds: Int?
     @Published var status = "ファイルとシリアルポートを選択してください"
-    @Published var pages: [ScreenshotPage] = []
+    @Published var pages: [LoadedScreenshot] = []
     @Published var imageStatus = "SwitchのSCREENSHOT SENDで保存した画像を追加してください"
     @Published var imageBusy = false
     private var cancellation: Cancellation?
@@ -171,6 +171,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             updateSelectionStatus()
         }
     }
+    /// フォーカスを外したときと送信直前で、Sync Key を -1...24 に収める。
+    func clampSyncKey() { syncKey = min(24, max(-1, syncKey)) }
     /// 進行中の送受信へ中止を知らせる。実際に止まるのはシリアル側の次の区切り。
     func stop() { cancellation?.cancel(); status = "中止処理中…" }
     /// DETECT SYNC KEY 画面向けに、約 4 秒の検出信号を送る。値そのものは Switch が表示する。
@@ -200,10 +202,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
     /// ファイルを種別に合わせてバイト列にし、HID レポートとして送る。
-    /// TXT は UTF-8 または BOM 付き UTF-16 を、BOM なし UTF-16LE にする。
+    /// TXT は UTF-8、BOM 付き UTF-16、シフトJISを、BOM なし UTF-16LE にする。
     /// DAT はそのまま、GRP は乗算前アルファを保った行優先 BGRA で、幅と高さはヘッダーへ出す。
     func send() {
         guard let file else { return }
+        // 数値欄に焦点があるまま押しても、入力中の値を確定してから範囲へ収める。
+        NSApp.keyWindow?.makeFirstResponder(nil)
+        clampSyncKey()
         let kind = kind, mode = compression, name = filename, path = port, sync = syncKey
         let token = Cancellation(); cancellation = token
         TransferGate.shared.begin(token) { [weak self] in
@@ -218,12 +223,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     guard (attributes[.size] as? NSNumber)?.intValue ?? Int.max <= Codec.maximumSize else { throw TransferError("入力ファイルが64 MiBを超えています。") }
                     var bytes: [UInt8], width = 0, height = 0
                     switch kind {
-                    case .text:
-                        let raw = try Data(contentsOf:file)
-                        let encoding: String.Encoding = raw.starts(with:[0xff,0xfe]) || raw.starts(with:[0xfe,0xff]) ? .utf16 : .utf8
-                        guard var text = String(data:raw,encoding:encoding) else { throw TransferError("TXTはUTF-8またはBOM付きUTF-16で保存してください。") }
-                        if text.first == "\u{feff}" { text.removeFirst() }
-                        bytes = Array(text.data(using:.utf16LittleEndian)!)
+                    case .text: bytes = try SourceText.utf16LE(from: Data(contentsOf: file))
                     case .data: bytes = Array(try Data(contentsOf:file))
                     case .graphics:
                         let image = try Raster.load(file); bytes = image.bgra; width = image.width; height = image.height
@@ -267,13 +267,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if panel.runModal() != .OK { return }
         let urls = panel.urls; imageBusy = true
         Task {
-            let results = await Task.detached { urls.map { url -> (ScreenshotPage?,String?) in
-                do { return (try ScreenshotPage.load(url),nil) }
-                catch { return (nil,"\(url.lastPathComponent): \(error.localizedDescription)") }
+            let results = await Task.detached { urls.map { url -> (ScreenshotPage?, String, String?) in
+                do { return (try ScreenshotPage.load(url), url.lastPathComponent, nil) }
+                catch { return (nil, url.lastPathComponent, "\(url.lastPathComponent): \(error.localizedDescription)") }
             }}.value
             var errors: [String] = []
-            for (page,error) in results {
-                if let page { pages.append(page) }
+            for (page, filename, error) in results {
+                if let page { pages.append(LoadedScreenshot(filename: filename, page: page)) }
                 if let error { errors.append(error) }
             }
             imageStatus = errors.isEmpty ? "\(pages.count) 枚を読み込みました。全ページが揃ったファイルを保存できます。" : errors.joined(separator:"\n")
@@ -281,8 +281,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
     /// 同一ファイルのページを名前順にまとめる。枚数が足りない組も一覧には残す。
-    var groups: [[ScreenshotPage]] {
-        Dictionary(grouping:pages,by: { $0.groupKey }).values.sorted { $0[0].name < $1[0].name }
+    var groups: [[LoadedScreenshot]] {
+        Dictionary(grouping: pages, by: { $0.page.groupKey }).values.sorted { $0[0].page.name < $1[0].page.name }
+    }
+    /// 追加した画像を 1 枚だけ外す。同じページの重複は、押した 1 枚だけ消える。
+    func removeScreenshot(_ id: UUID) {
+        pages.removeAll { $0.id == id }
+        imageStatus = pages.isEmpty ? "一覧をクリアしました。" : "\(pages.count) 枚を読み込みました。全ページが揃ったファイルを保存できます。"
     }
     /// 揃った組だけ保存する。不足や CRC 不一致は、その組のエラー文として状態欄に出す。
     func saveImages() {
@@ -292,12 +297,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let groups = groups; imageBusy = true
         Task {
             let messages = await Task.detached { groups.map { group -> String in
-                do { let url = try ScreenshotPage.export(group,directory:directory); return "保存: \(url.lastPathComponent)" }
-                catch { return "\(group[0].name): \(error.localizedDescription)" }
+                do { let url = try ScreenshotPage.export(group.map(\.page), directory: directory); return "保存: \(url.lastPathComponent)" }
+                catch { return "\(group[0].page.name): \(error.localizedDescription)" }
             }}.value
             imageStatus = messages.joined(separator:"\n"); imageBusy = false
         }
     }
+}
+/// 復元一覧の 1 枚。同じ画像を二度足したときは、削除で 1 枚ずつ外せる。
+struct LoadedScreenshot: Identifiable {
+    let id = UUID()
+    let filename: String
+    let page: ScreenshotPage
 }
 extension Cancellation {
     /// シリアルを開く前の準備中に使う中止。まだ Switch へは何も送っていない。
@@ -336,7 +347,7 @@ struct ContentView: View {
                                     .focused($syncKeyFocused)
                                     .frame(width: 44)
                                     .onChange(of: syncKeyFocused) { _, focused in
-                                        if !focused { model.syncKey = min(24, max(-1, model.syncKey)) }
+                                        if !focused { model.clampSyncKey() }
                                     }
                                 Stepper("Sync Key", value: $model.syncKey, in: -1...24).labelsHidden()
                                 Button("Detect Sync Key", action: model.detectSyncKey).disabled(model.port.isEmpty)
@@ -365,7 +376,7 @@ struct ContentView: View {
                         GridRow { Text("圧縮"); Picker("圧縮",selection:$model.compression) { ForEach(Compression.allCases,id:\.self) { Text($0.rawValue).tag($0) } }.labelsHidden() }
                         GridRow {
                             Color.clear.frame(width:0,height:0)
-                            Text("TXT: UTF-8 / UTF-16 → UTF-16LE　 DAT: バイナリ　 GRP: 画像 → BGRA").font(.system(size: 14)).foregroundStyle(.secondary).padding(.top, 8)
+                            Text("TXT: UTF-8 / UTF-16 / シフトJIS → UTF-16LE　 DAT: バイナリ　 GRP: 画像 → BGRA").font(.system(size: 14)).foregroundStyle(.secondary).padding(.top, 8)
                         }
                     }.disabled(model.busy)
                     .onPreferenceChange(FieldHeightKey.self) { fieldHeight = $0 }
@@ -388,13 +399,34 @@ struct ContentView: View {
                     Text("原寸のスクリーンショットを追加します。分割画像は順不同で選択できます。")
                     HStack { Button("画像を追加…",action:model.addImages); Button("一覧をクリア") { model.pages = []; model.imageStatus = "一覧をクリアしました。" }; Spacer(); Button("復元して保存…",action:model.saveImages).buttonStyle(.borderedProminent).disabled(model.pages.isEmpty) }.disabled(model.imageBusy)
                     List {
-                        ForEach(model.groups,id:\.first!.groupKey) { pages in
-                            let first = pages[0]
-                            let count = Set(pages.map(\.index)).count
-                            VStack(alignment:.leading,spacing:5) {
+                        ForEach(model.groups, id: \.first!.page.groupKey) { pages in
+                            let first = pages[0].page
+                            let count = Set(pages.map(\.page.index)).count
+                            let missing = ScreenshotPage.missingPageNumbers(pages.map(\.page))
+                            let items = pages.sorted { lhs, rhs in
+                                if lhs.page.index != rhs.page.index { return lhs.page.index < rhs.page.index }
+                                return lhs.filename < rhs.filename
+                            }
+                            VStack(alignment: .leading, spacing: 5) {
                                 HStack { Text(first.name).font(.system(size: 16, weight: .semibold)); Spacer(); Text("\(count) / \(first.total) 枚").foregroundStyle(count == first.total ? .green : .orange) }
-                                Text("\(first.fileSize) bytes · \(first.compression == 1 ? "LZSS" : "無圧縮") · CRC \(String(format:"%04X",first.crc))").font(.system(size: 14)).foregroundStyle(.secondary)
-                            }.padding(.vertical,4)
+                                Text("\(first.fileSize) bytes · \(first.compression == 1 ? "LZSS" : "無圧縮") · CRC \(String(format:"%04X", first.crc))").font(.system(size: 14)).foregroundStyle(.secondary)
+                                if !missing.isEmpty {
+                                    Text("不足ページ: " + missing.map(String.init).joined(separator: ", "))
+                                        .font(.system(size: 14))
+                                        .foregroundStyle(.orange)
+                                }
+                                ForEach(items) { item in
+                                    HStack {
+                                        Text(item.filename)
+                                        Text("ページ \(item.page.index + 1)").foregroundStyle(.secondary)
+                                        Spacer()
+                                        Button("削除") { model.removeScreenshot(item.id) }
+                                            .buttonStyle(.borderless)
+                                            .disabled(model.imageBusy)
+                                    }
+                                    .font(.system(size: 14))
+                                }
+                            }.padding(.vertical, 4)
                         }
                     }
                     if model.imageBusy { ProgressView() }

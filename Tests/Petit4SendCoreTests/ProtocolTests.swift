@@ -116,6 +116,32 @@ final class ProtocolTests: XCTestCase {
         let other = try page([5,6,7,8],original:original,index:1,total:2,name:"DAT:OTHER")
         XCTAssertThrowsError(try ScreenshotPage.assemble([a,other]))
     }
+    /// 不足番号は 1 始まり。同じ番号がもう 1 枚あっても、その番号は不足にしない。
+    func testMissingPageNumbersAreOneBased() throws {
+        let original: [UInt8] = [1,2,3,4,5,6,7,8]
+        let first = try page([1,2,3,4], original: original, total: 3)
+        let third = try page([1,2,3,4], original: original, index: 2, total: 3)
+        XCTAssertEqual(ScreenshotPage.missingPageNumbers([third, first, first]), [2])
+        let second = try page([5,6,7,8], original: original, index: 1, total: 3)
+        XCTAssertEqual(ScreenshotPage.missingPageNumbers([first, second, third]), [])
+    }
+    /// UTF-8 と BOM 付き UTF-16 は従来どおり。シフトJISは UTF-8 に読めないときだけ使う。
+    func testTextSourceEncodings() throws {
+        let text = "PRINT \"日本語\"\r\n"
+        let utf16 = Array(text.data(using: .utf16LittleEndian)!)
+        XCTAssertEqual(try SourceText.utf16LE(from: Data(text.utf8)), utf16)
+        XCTAssertEqual(try SourceText.utf16LE(from: Data([0xff, 0xfe]) + Data(utf16)), utf16)
+        var bigEndian = Data([0xfe, 0xff])
+        for unit in text.utf16 {
+            bigEndian.append(UInt8(unit >> 8))
+            bigEndian.append(UInt8(unit & 0xff))
+        }
+        XCTAssertEqual(try SourceText.utf16LE(from: bigEndian), utf16)
+        let shiftJIS = try XCTUnwrap(text.data(using: .shiftJIS))
+        XCTAssertNotEqual(Array(shiftJIS), Array(text.utf8))
+        XCTAssertEqual(try SourceText.utf16LE(from: shiftJIS), utf16)
+        XCTAssertThrowsError(try SourceText.utf16LE(from: Data([0xff])))
+    }
     /// 圧縮フラグ 1 のページは結合後に LZSS 展開する。
     func testCompressedPage() throws {
         let bytes = [UInt8](repeating:65,count:33)

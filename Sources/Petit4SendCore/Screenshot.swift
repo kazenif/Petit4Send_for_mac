@@ -70,8 +70,8 @@ public struct ScreenshotPage {
             if let previous = byIndex[page.index], previous.payload != page.payload { throw TransferError("同じページ番号の内容が一致しません。") }
             byIndex[page.index] = page
         }
-        let missing = (0..<first.total).filter { byIndex[$0] == nil }
-        guard missing.isEmpty else { throw TransferError("不足ページ: " + missing.map { String($0+1) }.joined(separator: ", ")) }
+        let missing = missingPageNumbers(pages)
+        guard missing.isEmpty else { throw TransferError("不足ページ: " + missing.map(String.init).joined(separator: ", ")) }
         let stream = (0..<first.total).flatMap { byIndex[$0]!.payload }
         let bytes: [UInt8]
         if first.compression == 1 { bytes = try Codec.decompress(stream, size: first.fileSize) }
@@ -81,6 +81,13 @@ public struct ScreenshotPage {
         }
         guard Codec.crc(bytes) == first.crc else { throw TransferError("CRC不一致: 画像が劣化しているか、別の転送の画像が混在しています。保存を中止しました。") }
         return bytes
+    }
+    /// 1 始まりの不足ページ番号。同じ番号が複数あっても、1 枚あれば不足にしない。
+    /// 空の配列では空。呼び出し側は同一ファイルの組だけを渡す。
+    public static func missingPageNumbers(_ pages: [ScreenshotPage]) -> [Int] {
+        guard let total = pages.first?.total, total > 0 else { return [] }
+        let present = Set(pages.map(\.index))
+        return (0..<total).compactMap { present.contains($0) ? nil : $0 + 1 }
     }
     /// 種類に応じて書き出す。TXT は UTF-16LE を UTF-8 に、GRP は BGRA を PNG に、DAT はそのまま。
     ///
